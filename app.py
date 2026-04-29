@@ -47,7 +47,8 @@ FIXTURES_PATH  = Path("data/clean/fixtures.csv")
 HISTORICAL_PATH = Path("data/clean/historical_results.csv")
 TEAM_STATS_PATH = Path("data/processed/team_stats.csv")
 MODEL_PATH     = Path("models/poisson_params.pkl")
-SIM_PATH       = Path("reports/simulations/sim_results_latest.csv")
+SIM_PATH            = Path("reports/simulations/sim_results_latest.csv")
+FORECAST_CACHE_PATH = Path("reports/simulations/forecast_cache.pkl")
 RELEGATION_SPOTS = 3
 EUROPEAN_SPOTS   = 3   # 1st: CL qualifying · 2nd–3rd: ECL qualifying (cup winner gets EL separately)
 
@@ -69,10 +70,11 @@ def _step_done(key: str) -> bool:
 
 # ── Session-state defaults ─────────────────────────────────────────────────────
 for key, default in {
-    "data_loaded":   False,
-    "model_trained": False,
-    "sim_complete":  False,
-    "active_page":   "Data",
+    "data_loaded":    False,
+    "model_trained":  False,
+    "sim_complete":   False,
+    "active_page":    "Forecast",
+    "admin_unlocked": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -96,21 +98,28 @@ if not st.session_state.sim_complete and SIM_PATH.exists():
         pass
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
+PUBLIC_PAGES  = {"Forecast", "Predictions"}
+ADMIN_PAGES   = {"Data", "Model", "Simulate", "Update"}
+
 with st.sidebar:
     st.title("⚽ Allsvenskan")
     st.caption("Monte Carlo Forecast")
     st.divider()
 
-    for i, (name, icon, gate) in enumerate(STEPS, 1):
-        done    = _step_done(gate)
-        active  = st.session_state.active_page == name
-        if active:
-            label = f"**{i}. {icon} {name}**"
-        elif done:
-            label = f"{i}. {icon} {name} ✅"
-        else:
-            label = f"{i}. {icon} {name}"
+    admin = st.session_state.admin_unlocked
+    visible_steps = STEPS if admin else [s for s in STEPS if s[0] in PUBLIC_PAGES]
 
+    for i, (name, icon, gate) in enumerate(STEPS, 1):
+        if name not in PUBLIC_PAGES and not admin:
+            continue
+        done   = _step_done(gate)
+        active = st.session_state.active_page == name
+        if active:
+            label = f"**{icon} {name}**"
+        elif done:
+            label = f"{icon} {name} ✅"
+        else:
+            label = f"{icon} {name}"
         st.button(
             label,
             key=f"nav_{name}",
@@ -120,18 +129,45 @@ with st.sidebar:
             args=(name,),
         )
 
+    if admin:
+        st.divider()
+        _upd_active = st.session_state.active_page == "Update"
+        st.button(
+            "**🔄 Update Everything**" if _upd_active else "🔄 Update Everything",
+            key="nav_Update",
+            use_container_width=True,
+            type="primary" if _upd_active else "secondary",
+            on_click=_nav,
+            args=("Update",),
+        )
+
+    # ── Admin login / logout ───────────────────────────────────────────────
     st.divider()
-    _upd_active = st.session_state.active_page == "Update"
-    st.button(
-        "**🔄 Update Everything**" if _upd_active else "🔄 Update Everything",
-        key="nav_Update",
-        use_container_width=True,
-        type="primary" if _upd_active else "secondary",
-        on_click=_nav,
-        args=("Update",),
-    )
+    if not admin:
+        with st.expander("🔒 Admin login"):
+            pwd = st.text_input("Password", type="password", key="admin_pwd_input", label_visibility="collapsed")
+            if st.button("Unlock", key="admin_login_btn", use_container_width=True):
+                expected = st.secrets.get("ADMIN_PASSWORD", "")
+                if expected and pwd == expected:
+                    st.session_state.admin_unlocked = True
+                    st.rerun()
+                else:
+                    st.error("Wrong password")
+    else:
+        st.caption("🔓 Admin mode")
+        if st.button("Lock", key="admin_lock_btn", use_container_width=True):
+            st.session_state.admin_unlocked = False
+            if st.session_state.active_page in ADMIN_PAGES:
+                st.session_state.active_page = "Forecast"
+            st.rerun()
 
 page = st.session_state.active_page
+
+# Redirect non-admin users away from admin pages
+if page in ADMIN_PAGES and not st.session_state.admin_unlocked:
+    st.session_state.active_page = "Forecast"
+    page = "Forecast"
+    st.rerun()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -178,21 +214,32 @@ def _load_sim(_mtime: float = 0) -> pd.DataFrame:
     df = df.T.groupby(level=0).sum().T
     return df
 
-@st.cache_data
-def _compute_forecast(_mtime: float = 0):
-    sim = _load_sim(_mtime)
-    # Normalise column names and collapse any duplicate team-name variants
-    # (e.g. "Djurgården" + "Djurgarden" must merge into one column).
+def _run_forecast_computation(sim: pd.DataFrame):
+    """Pure computation — no caching. Call this once after simulation then save to disk."""
     rename_map = {col: TEAM_NAME_MAP.get(col, col) for col in sim.columns}
     sim = sim.rename(columns=rename_map).T.groupby(level=0).sum().T
-    agg      = ResultsAggregator()
-    table    = agg.generate_final_table_prediction(sim)
-    champ    = agg.calculate_championship_odds(sim)
-    releg    = agg.calculate_relegation_odds(sim, relegation_spots=RELEGATION_SPOTS)
-    europe   = agg.calculate_european_qualification_odds(sim, european_spots=EUROPEAN_SPOTS)
+    agg       = ResultsAggregator()
+    table     = agg.generate_final_table_prediction(sim)
+    champ     = agg.calculate_championship_odds(sim)
+    releg     = agg.calculate_relegation_odds(sim, relegation_spots=RELEGATION_SPOTS)
+    europe    = agg.calculate_european_qualification_odds(sim, european_spots=EUROPEAN_SPOTS)
     pos_probs = agg.calculate_position_probabilities(sim)
-    summary  = agg.analyze_results(sim)
+    summary   = agg.analyze_results(sim)
     return table, champ, releg, europe, pos_probs, summary
+
+def _save_forecast_cache():
+    """Compute forecast from current sim file and persist to disk."""
+    sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
+    result = _run_forecast_computation(sim)
+    FORECAST_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(FORECAST_CACHE_PATH, "wb") as f:
+        pickle.dump(result, f)
+    return result
+
+def _load_forecast_cache():
+    """Load pre-computed forecast from disk. Raises if not available."""
+    with open(FORECAST_CACHE_PATH, "rb") as f:
+        return pickle.load(f)
 
 def _standings_from_results(results: pd.DataFrame) -> pd.DataFrame:
     teams = pd.unique(results[["HomeTeam", "AwayTeam"]].values.ravel())
@@ -668,6 +715,11 @@ This is critical — without it, early-season leaders would get no advantage.
 
                 SIM_PATH.parent.mkdir(parents=True, exist_ok=True)
                 sim_results.to_csv(SIM_PATH, index=False)
+                progress.progress(100, text="Computing forecast…")
+                try:
+                    _save_forecast_cache()
+                except Exception as _fe:
+                    st.warning(f"Forecast cache failed: {_fe}")
                 st.session_state.sim_complete = True
                 progress.progress(100, text="Done!")
                 st.success(f"Completed {n_sims:,} simulations over {n_fixtures} fixtures.")
@@ -717,8 +769,11 @@ This is critical — without it, early-season leaders would get no advantage.
 
         if st.session_state.sim_complete:
             try:
-                _mtime = SIM_PATH.stat().st_mtime
-                _, _, _, _, _, summary = _compute_forecast(_mtime)
+                if FORECAST_CACHE_PATH.exists():
+                    _, _, _, _, _, summary = _load_forecast_cache()
+                else:
+                    sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
+                    _, _, _, _, _, summary = _run_forecast_computation(sim)
                 if not summary.empty:
                     st.subheader("Last Simulation — Top 3")
                     for _, row in summary.head(3).iterrows():
@@ -743,10 +798,18 @@ elif page == "Forecast":
         _blocked("Simulate", "Run a simulation first to see the season forecast.")
 
     try:
-        _mtime = SIM_PATH.stat().st_mtime
-        table, champ, releg, europe, pos_probs, summary = _compute_forecast(_mtime)
+        if FORECAST_CACHE_PATH.exists():
+            table, champ, releg, europe, pos_probs, summary = _load_forecast_cache()
+        else:
+            # First time fallback: compute and save
+            sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
+            table, champ, releg, europe, pos_probs, summary = _run_forecast_computation(sim)
+            try:
+                _save_forecast_cache()
+            except Exception:
+                pass
     except Exception as e:
-        st.error(f"Could not load simulation results: {e}")
+        st.error(f"Could not load forecast: {e}")
         st.stop()
 
     n_teams = len(table)
@@ -1277,6 +1340,11 @@ elif page == "Update":
                 bar.progress(98, text="Saving results…")
                 SIM_PATH.parent.mkdir(parents=True, exist_ok=True)
                 sim_results.to_csv(SIM_PATH, index=False)
+                bar.progress(99, text="Computing forecast cache…")
+                try:
+                    _save_forecast_cache()
+                except Exception as _fe:
+                    st.warning(f"Forecast cache failed: {_fe}")
                 st.session_state.sim_complete = True
 
                 bar.progress(100, text="Done")

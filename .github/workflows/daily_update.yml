@@ -1,0 +1,43 @@
+name: Daily forecast update
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC every day
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python scripts/daily_update.py
+
+      - name: Commit updated data & forecast
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            data/clean/ \
+            data/processed/ \
+            data/raw/ \
+            models/ \
+            reports/simulations/
+          git diff --cached --quiet || git commit -m "chore: daily forecast update $(date -u '+%Y-%m-%d')"
+
+      - name: Push
+        run: git push
