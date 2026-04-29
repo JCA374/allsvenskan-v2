@@ -21,8 +21,25 @@ st.set_page_config(
     page_title="Allsvenskan Forecast",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
+
+# Responsive CSS: stack Streamlit columns on narrow screens
+st.markdown("""
+<style>
+@media (max-width: 640px) {
+    [data-testid="column"] {
+        min-width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+    /* Prevent wide tables / charts from overflowing */
+    [data-testid="stDataFrame"], [data-testid="stPlotlyChart"] {
+        max-width: 100vw;
+        overflow-x: auto;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 RESULTS_PATH   = Path("data/clean/results.csv")
@@ -208,17 +225,18 @@ def _color_table_row(row, n_teams):
     return [""] * len(row)
 
 def _stepper():
-    """Render a horizontal progress strip at the top of each page."""
-    cols = st.columns(len(STEPS))
-    for col, (i, (name, icon, gate)) in zip(cols, enumerate(STEPS, 1)):
+    """Render a compact progress strip at the top of each page."""
+    parts = []
+    for i, (name, icon, gate) in enumerate(STEPS, 1):
         done   = _step_done(gate)
         active = page == name
         if active:
-            col.markdown(f"**▶ {i}. {name}**")
+            parts.append(f"**▶ {icon} {name}**")
         elif done:
-            col.markdown(f"✅ {i}. {name}")
+            parts.append(f"✅ {name}")
         else:
-            col.markdown(f"<span style='color:#aaa'>{i}. {name}</span>", unsafe_allow_html=True)
+            parts.append(f"<span style='color:#aaa'>{i}. {name}</span>")
+    st.markdown("&nbsp; · &nbsp;".join(parts), unsafe_allow_html=True)
     st.divider()
 
 def _next_button(next_page: str):
@@ -964,7 +982,23 @@ elif page == "Predictions":
 
     # ── Match cards ───────────────────────────────────────────────────────────
     st.subheader("Match Details")
-    cards_html = []
+    cards_html = ["""<style>
+.match-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #e0e0e0;
+}
+.match-team { flex: 1 1 30%; min-width: 80px; }
+.match-team-away { text-align: right; }
+.match-center { flex: 1 1 30%; min-width: 120px; text-align: center; }
+@media (max-width: 480px) {
+    .match-card { flex-direction: column; align-items: stretch; }
+    .match-team, .match-team-away, .match-center { text-align: left; min-width: unset; }
+}
+</style>"""]
     for r in pred_df.to_dict("records"):
         hw  = float(r["Home Win"]) * 100
         dw  = float(r["Draw"])    * 100
@@ -972,13 +1006,12 @@ elif page == "Predictions":
         xgh = float(r["xG Home"])
         xga = float(r["xG Away"])
         cards_html.append(f"""
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:center;
-            padding:10px 0;border-bottom:1px solid #e0e0e0">
-  <div>
+<div class="match-card">
+  <div class="match-team">
     <strong>{r['Home']}</strong><br>
     <span style="color:#888;font-size:0.8em">xG {xgh:.2f}</span>
   </div>
-  <div style="text-align:center">
+  <div class="match-center">
     <div style="color:#888;font-size:0.75em;margin-bottom:4px">{r['Date']}</div>
     <div style="font-size:1em;margin-bottom:6px">{hw:.0f}% · {dw:.0f}% · {aw:.0f}%</div>
     <div style="display:flex;height:10px;border-radius:4px;overflow:hidden">
@@ -990,7 +1023,7 @@ elif page == "Predictions":
       <span>Home</span><span>Draw</span><span>Away</span>
     </div>
   </div>
-  <div style="text-align:right">
+  <div class="match-team match-team-away">
     <strong>{r['Away']}</strong><br>
     <span style="color:#888;font-size:0.8em">xG {xga:.2f}</span>
   </div>
