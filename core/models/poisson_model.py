@@ -158,10 +158,25 @@ class PoissonModel:
             if len(df) < 10:
                 raise ValueError(f"Insufficient data: {len(df)} matches")
 
+            # Sanity-cap extreme score-lines (data errors, not real football)
+            MAX_GOALS = 9
+            capped = ((df['FTHG'] > MAX_GOALS) | (df['FTAG'] > MAX_GOALS)).sum()
+            if capped:
+                warnings.warn(
+                    f"{capped} match(es) had goals > {MAX_GOALS} and were clipped — "
+                    "check source data for errors.",
+                    stacklevel=2,
+                )
+            df['FTHG'] = df['FTHG'].clip(upper=MAX_GOALS)
+            df['FTAG'] = df['FTAG'].clip(upper=MAX_GOALS)
+
             # Build stable team index
             teams = sorted(set(df['HomeTeam'].unique()) | set(df['AwayTeam'].unique()))
             self._team_index = {t: i for i, t in enumerate(teams)}
             n = len(teams)
+
+            # Connectivity check — model is unidentifiable on a disconnected fixture graph
+            self._check_connectivity(df, teams, self._team_index)
 
             # Time weights: φ(t) = exp(−ξ · t)
             ref_date = df['Date'].max()
@@ -201,9 +216,44 @@ class PoissonModel:
             else:
                 print(f"✅ Dixon-Coles fitted. γ={gamma:.3f}, ρ={rho:.3f}")
 
+        except ValueError:
+            # ValueError covers: empty data, insufficient matches, disconnected
+            # graph — all are clear programming/data errors that must propagate.
+            raise
         except Exception as exc:
             print(f"Error fitting Dixon-Coles model: {exc}")
             self._set_defaults(results_df)
+
+    @staticmethod
+    def _check_connectivity(df, teams, team_index):
+        """Raise ValueError if the team-vs-team fixture graph is disconnected.
+
+        A disconnected graph makes attack/defence ratings unidentifiable: teams
+        in separate components have no common reference point, so their ratings
+        are only internally consistent, not comparable across components.
+        """
+        from scipy.sparse import csr_matrix
+        from scipy.sparse.csgraph import connected_components
+
+        n = len(teams)
+        hi = df['HomeTeam'].map(team_index).values
+        ai = df['AwayTeam'].map(team_index).values
+        # Undirected adjacency: both directions
+        rows = np.concatenate([hi, ai])
+        cols = np.concatenate([ai, hi])
+        adj = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
+        n_components, labels = connected_components(adj, directed=False)
+        if n_components > 1:
+            groups = {}
+            for team, label in zip(teams, labels):
+                groups.setdefault(label, []).append(team)
+            detail = "; ".join(
+                f"component {k}: {v}" for k, v in groups.items()
+            )
+            raise ValueError(
+                f"Fixture graph has {n_components} disconnected components — "
+                f"model is unidentifiable. {detail}"
+            )
 
     def _optimise(self, home_idx, away_idx, gh, ga, weights, n_teams,
                   max_iter=300, n_starts=5):

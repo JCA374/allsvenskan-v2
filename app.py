@@ -476,32 +476,29 @@ Time-weighting uses **φ(t) = exp(−ξ·t)** where t is days before training an
                 mc3.metric("Held-out RPS",      f"{model.validation_score:.4f}" if model.validation_score else "N/A",
                            help="Rank Probability Score on last 10% of training data. Lower is better.")
 
-                if TEAM_STATS_PATH.exists():
-                    st.subheader("Team Strengths")
+                if model.attack_rates:
+                    st.subheader("Team Strengths (DC parameters)")
                     st.caption(
-                        "α (attack): log-scale — higher = more goals scored. "
+                        "α (attack): log-scale, fitted by Dixon-Coles — higher = more goals scored. "
                         "β (defence): log-scale — lower (more negative) = fewer goals conceded."
                     )
-                    ts = pd.read_csv(TEAM_STATS_PATH, index_col=0)
-                    display_cols = [c for c in ["attack_strength", "defense_strength", "avg_goals_scored", "avg_goals_conceded"] if c in ts.columns]
-                    if display_cols:
-                        ts_show = ts[display_cols].copy().sort_values("attack_strength", ascending=False)
-                        ts_show.index.name = "Team"
-                        ts_show.columns = [c.replace("_", " ").title() for c in ts_show.columns]
+                    dc_df = pd.DataFrame({
+                        "α (Attack)":  pd.Series(model.attack_rates),
+                        "β (Defence)": pd.Series(model.defense_rates),
+                    }).sort_values("α (Attack)", ascending=False)
+                    dc_df.index.name = "Team"
 
-                        fig = go.Figure()
-                        if "Attack Strength" in ts_show.columns:
-                            fig.add_bar(x=ts_show.index, y=ts_show["Attack Strength"], name="Attack (α)", marker_color="#2196F3")
-                        if "Defense Strength" in ts_show.columns:
-                            fig.add_bar(x=ts_show.index, y=ts_show["Defense Strength"], name="Defense (β, lower=better)", marker_color="#F44336")
-                        fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="league avg")
-                        fig.update_layout(
-                            barmode="group", xaxis_tickangle=-45,
-                            height=320, margin=dict(t=20, b=10),
-                            legend=dict(orientation="h", yanchor="bottom", y=1),
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.dataframe(ts_show.round(3), use_container_width=True)
+                    fig = go.Figure()
+                    fig.add_bar(x=dc_df.index, y=dc_df["α (Attack)"],  name="Attack (α)",              marker_color="#2196F3")
+                    fig.add_bar(x=dc_df.index, y=dc_df["β (Defence)"], name="Defence (β, lower=better)", marker_color="#F44336")
+                    fig.add_hline(y=0.0, line_dash="dash", line_color="gray", annotation_text="α=0 (league avg)")
+                    fig.update_layout(
+                        barmode="group", xaxis_tickangle=-45,
+                        height=320, margin=dict(t=20, b=10),
+                        legend=dict(orientation="h", yanchor="bottom", y=1),
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.dataframe(dc_df.round(3), use_container_width=True)
 
                 # ── Interactive prediction breakdown ──────────────────────────
                 if model.attack_rates:
@@ -625,8 +622,8 @@ This is critical — without it, early-season leaders would get no advantage.
                 progress.progress(int(pct), text=f"{pct:.0f}%")
 
             try:
-                # Always use the model exactly as trained — window and mode are
-                # fixed on the CV and Model pages; no silent retrain here.
+                # Always use the model exactly as trained — settings are
+                # fixed on the Model page; no silent retrain here.
                 model = _load_model()
                 simulator = MonteCarloSimulator.from_upcoming_fixtures(model)
 
@@ -875,7 +872,7 @@ elif page == "Forecast":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "Predictions":
     _stepper()
-    st.title("Step 6 — Predictions")
+    st.title("Step 5 — Predictions")
 
     if not st.session_state.model_trained:
         _blocked("Model", "Train the model first to generate fixture predictions.")
@@ -1008,7 +1005,7 @@ elif page == "Predictions":
 elif page == "Update":
     # ── Session-state defaults for this page ─────────────────────────────────
     for _k, _v in {
-        "upd_step":  None,   # None | "data" | "cv" | "model" | "sim" | "done"
+        "upd_step":  None,   # None | "data" | "model" | "sim" | "done"
         "upd_stop":  False,
         "upd_log":   [],     # list of dicts {label, state, msg}
     }.items():
@@ -1116,7 +1113,7 @@ elif page == "Update":
 
             skip_fetch = data_age_hours is not None and data_age_hours < 1
 
-            st.subheader("Step 1/4 — Match data")
+            st.subheader("Step 1/3 — Match data")
             bar  = st.progress(0, text="Starting…")
 
             if skip_fetch:
@@ -1168,7 +1165,7 @@ elif page == "Update":
 
             except Exception as e:
                 bar.progress(100, text="Failed")
-                _log("Step 1/4 — Data", "error", str(e))
+                _log("Step 1/3 — Data", "error", str(e))
                 st.session_state.upd_step = "done"
                 st.rerun()
 

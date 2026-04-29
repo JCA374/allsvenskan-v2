@@ -160,3 +160,44 @@ def test_outcome_probabilities_sum_to_one():
     probs = model.predict_outcome_probabilities(teams[0], teams[1])
     total = probs['home_win'] + probs['draw'] + probs['away_win']
     assert abs(total - 1.0) < 1e-6, f"Probabilities sum to {total}"
+
+
+# ── Data-prep guards ──────────────────────────────────────────────────────────
+
+def test_scoreline_cap_clips_extreme_goals():
+    """Goals > 9 must be clipped to 9; the model should still fit without error."""
+    df = _make_dummy_df(n=150)
+    # Inject one absurd score-line (data error)
+    df.loc[0, 'FTHG'] = 25
+    df.loc[1, 'FTAG'] = 18
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        model = PoissonModel(time_decay=0.0018)
+        model.fit(df)
+    assert model.fitted
+    assert any("clipped" in str(w.message).lower() for w in caught), \
+        "Expected a clipping warning for extreme score-lines"
+
+
+def test_disconnected_graph_raises():
+    """fit() must raise ValueError when the fixture graph is disconnected."""
+    rng = np.random.default_rng(99)
+    # Two isolated groups of teams that never play each other
+    group_a = ["A1", "A2", "A3"]
+    group_b = ["B1", "B2", "B3"]
+    rows = []
+    base = pd.Timestamp("2023-01-01")
+    for i in range(60):
+        teams = group_a if i % 2 == 0 else group_b
+        h, a = rng.choice(teams, size=2, replace=False)
+        rows.append({
+            'Date': base + pd.Timedelta(days=i),
+            'HomeTeam': h, 'AwayTeam': a,
+            'FTHG': int(rng.poisson(1.4)),
+            'FTAG': int(rng.poisson(1.1)),
+        })
+    df = pd.DataFrame(rows)
+    model = PoissonModel()
+    with pytest.raises(ValueError, match="disconnected"):
+        model.fit(df)
