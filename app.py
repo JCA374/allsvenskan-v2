@@ -1,5 +1,4 @@
 import os
-import json
 import pickle
 from pathlib import Path
 
@@ -32,15 +31,12 @@ HISTORICAL_PATH = Path("data/clean/historical_results.csv")
 TEAM_STATS_PATH = Path("data/processed/team_stats.csv")
 MODEL_PATH     = Path("models/poisson_params.pkl")
 SIM_PATH       = Path("reports/simulations/sim_results_latest.csv")
-CV_CACHE_PATH  = Path("data/processed/cv_cache.json")
-
 RELEGATION_SPOTS = 3
 EUROPEAN_SPOTS   = 3   # 1st: CL qualifying · 2nd–3rd: ECL qualifying (cup winner gets EL separately)
 
 # ── Pipeline steps definition ──────────────────────────────────────────────────
 STEPS = [
     ("Data",        "🗄️",  "data_loaded"),
-    ("CV",          "🔬",  "cv_complete"),
     ("Model",       "🧠",  "model_trained"),
     ("Simulate",    "🎲",  "sim_complete"),
     ("Forecast",    "📊",  "sim_complete"),
@@ -54,42 +50,12 @@ def _nav(page: str):
 def _step_done(key: str) -> bool:
     return bool(st.session_state.get(key, False))
 
-def _save_cv_cache(cv_results, cv_optimal_k, selected_window):
-    try:
-        CV_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(CV_CACHE_PATH, "w") as f:
-            json.dump({
-                "cv_results":      cv_results,
-                "cv_optimal_k":    cv_optimal_k,
-                "selected_window": selected_window,
-            }, f)
-    except Exception:
-        pass
-
-def _load_cv_cache():
-    try:
-        if CV_CACHE_PATH.exists():
-            with open(CV_CACHE_PATH) as f:
-                data = json.load(f)
-            return (
-                data.get("cv_results"),
-                data.get("cv_optimal_k"),
-                data.get("selected_window"),
-            )
-    except Exception:
-        pass
-    return None, None, None
-
 # ── Session-state defaults ─────────────────────────────────────────────────────
 for key, default in {
-    "data_loaded":      False,
-    "model_trained":    False,
-    "sim_complete":     False,
-    "cv_complete":      False,
-    "active_page":      "Data",
-    "cv_results":       None,
-    "cv_optimal_k":     None,
-    "selected_window":  None,   # the single confirmed training window for the whole pipeline
+    "data_loaded":   False,
+    "model_trained": False,
+    "sim_complete":  False,
+    "active_page":   "Data",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -111,14 +77,6 @@ if not st.session_state.sim_complete and SIM_PATH.exists():
             st.session_state.sim_complete = True
     except Exception:
         pass
-
-if st.session_state.cv_results is None:
-    _cv, _k, _sel = _load_cv_cache()
-    if _cv is not None:
-        st.session_state.cv_results      = _cv
-        st.session_state.cv_optimal_k    = _k
-        st.session_state.selected_window = _sel
-        st.session_state.cv_complete     = True
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -168,29 +126,6 @@ def _normalize_teams(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].map(lambda t: TEAM_NAME_MAP.get(str(t).strip(), str(t).strip()))
     return df
-
-def _filter_by_window(results: pd.DataFrame, k: int | None) -> pd.DataFrame:
-    if k is None or "SeasonStart" not in results.columns:
-        return results
-    seasons = sorted(results["SeasonStart"].dropna().astype(int).unique())
-    keep = seasons[-k:]
-    return results[results["SeasonStart"].isin(keep)].copy()
-
-def _show_window_badge(results: pd.DataFrame):
-    """Display the active training window (read-only). Set on the CV page."""
-    k = st.session_state.get("selected_window")
-    if k and "SeasonStart" in results.columns and not results.empty:
-        seasons = sorted(results["SeasonStart"].dropna().astype(int).unique())
-        keep    = seasons[-k:]
-        n       = len(results[results["SeasonStart"].isin(keep)])
-        label   = f"{keep[0]}–{keep[-1]}" if len(keep) > 1 else str(keep[0])
-        st.info(f"Training window: **{k} season(s)** — {label} · {n} matches  *(set on CV page)*")
-    else:
-        n = len(results) if not results.empty else 0
-        if "SeasonStart" in results.columns and not results.empty:
-            seasons = sorted(results["SeasonStart"].dropna().astype(int).unique())
-            label   = f"{seasons[0]}–{seasons[-1]}" if len(seasons) > 1 else str(seasons[0])
-            st.info(f"Training window: **all seasons** — {label} · {n} matches  *(run CV to optimise)*")
 
 def _load_results() -> pd.DataFrame:
     df = pd.read_csv(RESULTS_PATH, parse_dates=["Date"])
@@ -309,13 +244,12 @@ if page == "Data":
 
     with st.expander("📐 How the pipeline works"):
         st.markdown("""
-**Data → CV → Model → Simulate → Forecast**
+**Data → Model → Simulate → Forecast**
 
 | Step | What happens |
 |------|-------------|
 | **Data** | Download completed match results + upcoming fixtures from football-data.co.uk |
-| **CV** | Walk-forward cross-validation finds the optimal number of historical seasons to train on |
-| **Model** | Fits a Poisson regression to estimate each team's attack & defense strength |
+| **Model** | Fits a Dixon-Coles model to estimate each team's attack & defence strength |
 | **Simulate** | Plays out the remaining fixtures 10 000× using random Poisson draws |
 | **Forecast** | Aggregates the 10 000 simulations into finish probabilities |
 
@@ -466,204 +400,32 @@ Rows without goal values are upcoming fixtures.
             st.error(f"Could not load match history: {e}")
 
     if st.session_state.data_loaded:
-        _next_button("CV")
+        _next_button("Model")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — CV
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "CV":
-    _stepper()
-    st.title("Step 2 — Cross-Validation")
-    st.caption(
-        "Finds the optimal number of historical seasons to train on. "
-        "The confirmed window flows automatically to Model training and Simulation — it is set here once and nowhere else."
-    )
-
-    with st.expander("📐 How cross-validation works"):
-        st.markdown("""
-**Goal:** find the training window that makes the model's match predictions most accurate — not just the one that fits past data best.
-
-**Walk-forward CV procedure:**
-1. Hold out the last completed season as the *validation* set (never seen during training)
-2. Train the model on the *k* seasons before it
-3. For every match in the validation set, record the probability the model assigned to the actual outcome
-4. Compute **log-loss** = average of −log(p), where *p* is the predicted probability of what happened
-
-**Why log-loss?**
-Log-loss penalises confident wrong predictions heavily. A model that says "home win 90%" and gets it wrong scores much worse than one that said "home win 60%". Lower log-loss = better-calibrated predictions.
-
-| log-loss | Interpretation |
-|----------|---------------|
-| ~1.10 | Random guessing (1/3 probability to each outcome) |
-| ~0.95 | Reasonable football model |
-| ~0.85 | Very good model |
-
-**Why do windows give similar results?**
-The model applies exponential time-decay (decay = 0.01). A match played 1 year ago gets weight e⁻³·⁶⁵ ≈ 2.6%, two years ago ≈ 0.07%. Extra historical seasons add almost no information to the fit — so log-loss differences between windows are real but small by design.
-        """)
-
-    if not st.session_state.data_loaded:
-        _blocked("Data", "Download data first before running CV.")
-
-    # ── Run CV ────────────────────────────────────────────────────────────────
-    if st.button("Run CV", type="primary"):
-        with st.spinner("Running walk-forward cross-validation…"):
-            try:
-                all_results = _load_results()
-                cv_out      = PoissonModel.walk_forward_cv(all_results)
-                optimal_k   = None
-                hist        = cv_out.get("historical", [])
-                if hist:
-                    optimal_k = min(hist, key=lambda r: r["log_loss"])["lookback"]
-                st.session_state["cv_results"]   = cv_out
-                st.session_state["cv_optimal_k"] = optimal_k
-                # Don't auto-confirm yet — let the user review and confirm below
-                st.rerun()
-            except Exception as e:
-                st.error(f"CV failed: {e}")
-
-    cv_out = st.session_state.get("cv_results")
-    if cv_out:
-        hist_rows = cv_out.get("historical", [])
-        curr_rows = cv_out.get("current_season", [])
-
-        def _render_cv(rows, title):
-            if not rows:
-                return None
-            df = pd.DataFrame(rows)
-            df["train_seasons"] = df["train_seasons"].apply(
-                lambda s: f"{s[0]}–{s[-1]}" if len(s) > 1 else str(s[0])
-            )
-            best_idx = df["log_loss"].idxmin()
-            df[""] = ""
-            df.at[best_idx, ""] = "◄ best"
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.caption(title)
-                st.dataframe(
-                    df[["lookback", "train_seasons", "n_train", "n_val", "log_loss", ""]]
-                    .rename(columns={
-                        "lookback": "Lookback", "train_seasons": "Train range",
-                        "n_train": "N train", "n_val": "N val", "log_loss": "Log-loss",
-                    }),
-                    use_container_width=True, hide_index=True,
-                )
-            with c2:
-                fig = go.Figure()
-                fig.add_scatter(
-                    x=df["lookback"], y=df["log_loss"], mode="lines+markers",
-                    marker=dict(size=8, color="#2196F3"), line=dict(width=2), name="Log-loss",
-                )
-                fig.add_scatter(
-                    x=[df.loc[best_idx, "lookback"]], y=[df.loc[best_idx, "log_loss"]],
-                    mode="markers", marker=dict(size=12, color="#4CAF50", symbol="star"), name="Best",
-                )
-                fig.update_layout(
-                    xaxis_title="Lookback (seasons)", yaxis_title="Log-loss",
-                    height=240, margin=dict(t=10, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=1),
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            return df.loc[best_idx]
-
-        _render_cv(hist_rows, "Historical CV (validates on last complete season)")
-        if curr_rows:
-            st.divider()
-            _render_cv(curr_rows, "Current season (train on early matches, validate on recent)")
-
-        st.divider()
-
-        # ── Confirm window ────────────────────────────────────────────────────
-        st.subheader("Confirm training window")
-        st.caption(
-            "**Why differences between windows are small:** the model applies exponential "
-            "time-decay (decay=0.01) — a match 1 year old has weight ≈2.6%, 2 years ≈0.07%. "
-            "Extra historical seasons contribute near-zero to the fit, so the effect is real but small."
-        )
-
-        optimal_k = st.session_state.get("cv_optimal_k")
-        options   = ["All available", "1 season", "2 seasons", "3 seasons", "5 seasons", "8 seasons"]
-        k_map     = {"All available": None, "1 season": 1, "2 seasons": 2,
-                     "3 seasons": 3, "5 seasons": 5, "8 seasons": 8}
-
-        default_label = "All available"
-        if optimal_k:
-            for lbl, v in k_map.items():
-                if v == optimal_k:
-                    default_label = lbl
-                    break
-
-        chosen = st.selectbox(
-            "Training window to use for Model and Simulation",
-            options,
-            index=options.index(default_label),
-            help="CV recommends the pre-selected option. You can override it here.",
-        )
-        confirmed_k = k_map[chosen]
-
-        # Show what seasons this covers
-        try:
-            all_res  = _load_results()
-            if confirmed_k and "SeasonStart" in all_res.columns:
-                seasons  = sorted(all_res["SeasonStart"].dropna().astype(int).unique())
-                keep     = seasons[-confirmed_k:]
-                n        = len(all_res[all_res["SeasonStart"].isin(keep)])
-                lbl      = f"{keep[0]}–{keep[-1]}" if len(keep) > 1 else str(keep[0])
-                marker   = " (CV-recommended)" if confirmed_k == optimal_k else ""
-                st.caption(f"Seasons {lbl} · {n} matches{marker}")
-            else:
-                seasons  = sorted(all_res["SeasonStart"].dropna().astype(int).unique()) if "SeasonStart" in all_res.columns else []
-                lbl      = f"{seasons[0]}–{seasons[-1]}" if len(seasons) > 1 else "all"
-                st.caption(f"All seasons {lbl} · {len(all_res)} matches")
-        except Exception:
-            pass
-
-        if st.button("Confirm window and proceed to Model", type="primary"):
-            st.session_state["selected_window"] = confirmed_k
-            st.session_state["cv_complete"]     = True
-            _save_cv_cache(cv_out, optimal_k, confirmed_k)
-            st.success(f"Window confirmed: **{chosen}**. All downstream steps will use this.")
-            _nav("Model")
-    else:
-        st.info("Click Run CV to analyse how many seasons of data produce the best predictions.")
-        st.caption("You can also skip this step and train with all available data on the Model page.")
-        if st.button("Skip CV — use all data"):
-            st.session_state["selected_window"] = None
-            st.session_state["cv_complete"]     = True
-            _save_cv_cache(None, None, None)
-            _nav("Model")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 3 — MODEL
+# STEP 2 — MODEL
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "Model":
     _stepper()
-    st.title("Step 3 — Model")
+    st.title("Step 2 — Model")
 
-    with st.expander("📐 The Poisson model — how it works"):
+    with st.expander("📐 Dixon-Coles model — how it works"):
         st.markdown(r"""
-**Core idea:** model goals as two independent Poisson random variables, one per team.
+**Core idea:** Dixon & Coles (1997) bivariate-Poisson model fitted by maximum pseudo-likelihood with exponential time-weighting.
 
-$$\mu_{\text{home}} = \lambda \times \alpha_{\text{home}} \times \beta_{\text{away}} \times \gamma$$
-$$\mu_{\text{away}} = \lambda \times \alpha_{\text{away}} \times \beta_{\text{home}}$$
+$$\lambda = \exp(\alpha_{\text{home}} + \beta_{\text{away}} + \gamma) \qquad \mu = \exp(\alpha_{\text{away}} + \beta_{\text{home}})$$
 
 | Symbol | Meaning | Typical value |
 |--------|---------|--------------|
-| **λ** | League average goals per team per match (time-weighted) | 1.3 – 1.5 |
-| **α** | Attack strength — goals scored / λ. >1 = above average attack | 0.7 – 1.4 |
-| **β** | Defense strength — goals conceded / λ. **<1 = solid defense (hard to score against), >1 = leaky** | 0.7 – 1.4 |
-| **γ** | Home advantage — ratio of home goals to away goals | 1.1 – 1.4 |
+| **α** | Attack strength (log-scale). Higher = scores more goals | top teams ≈ +0.4 – +0.6 |
+| **β** | Defence weakness (log-scale). **Lower (more negative) = concedes less** | top teams ≈ −0.4 – −0.6 |
+| **γ** | Home advantage (log-scale) | 0.16 – 0.35 |
+| **ρ** | Low-score dependence — corrects 0-0 / 1-1 joint probabilities | −0.15 – 0.05 |
 
-Once we have μ_home and μ_away, the probability of any scoreline (h, a) is:
+Probabilities are computed from a full score-line grid (P(h,a) for h,a up to 10) with the DC τ correction applied to the four low-score cells. Results sum to exactly 1 after normalisation.
 
-$$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
-
-**Advanced mode** adds:
-- **MLE** — maximises the joint log-likelihood across all matches instead of simple averages, with L2 regularisation to prevent scale drift
-- **Bayesian shrinkage** — teams with few matches are pulled toward league average (prevents overfit for promoted/new teams)
-- **Dixon-Coles** — small correction to 0-0 and 1-1 probabilities, which Poisson systematically under/over-predicts
+Time-weighting uses **φ(t) = exp(−ξ·t)** where t is days before training and ξ ≈ 0.0018 day⁻¹ (a match 1 year ago retains ~52% weight; 2 years ago ~27%).
         """)
 
     if not st.session_state.data_loaded:
@@ -673,20 +435,11 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
 
     with col_train:
         st.subheader("Train")
-        mode = st.radio(
-            "Training mode",
-            ["Fast", "Advanced (MLE + Dixon-Coles)"],
-            help="Advanced is more accurate but takes longer.",
-        )
-        advanced = mode.startswith("Advanced")
-
-        train_k = st.session_state.get("selected_window")
-        _show_window_badge(_load_results())
 
         if st.button("Train Model", type="primary"):
             with st.spinner("Calculating team strengths…"):
                 try:
-                    results = _filter_by_window(_load_results(), train_k)
+                    results = _load_results()
                     strength_calc = TeamStrengthCalculator(use_odds_integration=False)
                     team_stats = strength_calc.calculate_strengths(results)
                     TEAM_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -695,12 +448,11 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
                     st.error(f"Strength calculation failed: {e}")
                     st.stop()
 
-            with st.spinner(f"Training {'advanced' if advanced else 'fast'} Poisson model…"):
+            with st.spinner("Fitting Dixon-Coles model…"):
                 try:
                     team_stats = pd.read_csv(TEAM_STATS_PATH, index_col=0)
-                    model = PoissonModel(use_mle=advanced, use_dixon_coles=advanced)
+                    model = PoissonModel()
                     model.fit(results, team_stats)
-                    model.training_window = train_k
                     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
                     model.save(str(MODEL_PATH))
                     st.session_state.model_trained = True
@@ -714,20 +466,21 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
             try:
                 model = _load_model()
                 st.subheader("Parameters")
-                mode_label    = "Advanced (MLE + Dixon-Coles)" if getattr(model, "use_mle", False) else "Fast"
                 trained_label = model.last_trained.strftime("%Y-%m-%d %H:%M") if getattr(model, "last_trained", None) else "Unknown"
-                window_label  = f"{model.training_window} season(s)" if getattr(model, "training_window", None) else "all"
-                st.caption(f"Mode: **{mode_label}** · Window: **{window_label}** · Trained: **{trained_label}**")
-                mc1, mc2 = st.columns(2)
-                mc1.metric("Home Advantage",        f"{model.home_advantage:.3f}")
-                mc2.metric("League Avg Goals/Match", f"{model.league_avg:.3f}")
+                st.caption(f"Dixon-Coles · Trained: **{trained_label}**")
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("Home advantage γ",  f"{model.home_advantage:.3f}",
+                           help="Log-scale home advantage parameter. Typical range 0.16–0.35.")
+                mc2.metric("Low-score ρ",       f"{model.rho:.4f}",
+                           help="Dixon-Coles low-score dependence. Negative = 0-0/1-1 more frequent than independent Poisson predicts.")
+                mc3.metric("Held-out RPS",      f"{model.validation_score:.4f}" if model.validation_score else "N/A",
+                           help="Rank Probability Score on last 10% of training data. Lower is better.")
 
                 if TEAM_STATS_PATH.exists():
                     st.subheader("Team Strengths")
                     st.caption(
-                        "Attack >1.0 = scores more than average. "
-                        "Defense <1.0 = concedes less than average (solid). "
-                        "Defense >1.0 = concedes more than average (leaky)."
+                        "α (attack): log-scale — higher = more goals scored. "
+                        "β (defence): log-scale — lower (more negative) = fewer goals conceded."
                     )
                     ts = pd.read_csv(TEAM_STATS_PATH, index_col=0)
                     display_cols = [c for c in ["attack_strength", "defense_strength", "avg_goals_scored", "avg_goals_conceded"] if c in ts.columns]
@@ -759,19 +512,18 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
                     ex_away_opts = [t for t in teams_sorted if t != ex_home]
                     ex_away = _pc2.selectbox("Away team", ex_away_opts, key="ex_away")
 
-                    ah  = model.attack_rates.get(ex_home, 1.0)
-                    dh  = model.defense_rates.get(ex_home, 1.0)
-                    aa  = model.attack_rates.get(ex_away, 1.0)
-                    da  = model.defense_rates.get(ex_away, 1.0)
-                    lam = model.league_avg
+                    # Dixon-Coles log-additive: λ = exp(α_home + β_away + γ)
+                    ah  = model.attack_rates.get(ex_home, 0.0)
+                    dh  = model.defense_rates.get(ex_home, 0.0)
+                    aa  = model.attack_rates.get(ex_away, 0.0)
+                    da  = model.defense_rates.get(ex_away, 0.0)
                     gam = model.home_advantage
-                    mu_h = lam * ah * da * gam
-                    mu_a = lam * aa * dh
+                    mu_h, mu_a = model.predict_match(ex_home, ex_away)
 
                     st.markdown(
-                        f"**μ_home** = λ({lam:.2f}) × α_{ex_home}({ah:.3f}) × β_{ex_away}({da:.3f}) × γ({gam:.3f}) "
+                        f"**λ_home** = exp(α_{ex_home}({ah:+.3f}) + β_{ex_away}({da:+.3f}) + γ({gam:+.3f})) "
                         f"= **{mu_h:.2f} xG**  \n"
-                        f"**μ_away** = λ({lam:.2f}) × α_{ex_away}({aa:.3f}) × β_{ex_home}({dh:.3f}) "
+                        f"**λ_away** = exp(α_{ex_away}({aa:+.3f}) + β_{ex_home}({dh:+.3f})) "
                         f"= **{mu_a:.2f} xG**"
                     )
                     try:
@@ -780,8 +532,7 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
                         _m1.metric(f"{ex_home} win", f"{probs['home_win']:.0%}")
                         _m2.metric("Draw",           f"{probs['draw']:.0%}")
                         _m3.metric(f"{ex_away} win", f"{probs['away_win']:.0%}")
-                        if getattr(model, "use_dixon_coles", False):
-                            st.caption(f"Dixon-Coles ρ = {model.rho:.4f} (low-score correction active)")
+                        st.caption(f"Dixon-Coles ρ = {model.rho:.4f}")
                     except Exception:
                         pass
 
@@ -795,11 +546,11 @@ $$P(H=h, A=a) = \text{Poisson}(h;\mu_h) \times \text{Poisson}(a;\mu_a)$$
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 4 — SIMULATE
+# STEP 3 — SIMULATE
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "Simulate":
     _stepper()
-    st.title("Step 4 — Simulate")
+    st.title("Step 3 — Simulate")
 
     with st.expander("📐 How the Monte Carlo simulation works"):
         st.markdown("""
@@ -858,10 +609,9 @@ This is critical — without it, early-season leaders would get no advantage.
             try:
                 _m = _load_model()
                 _trained  = getattr(_m, "last_trained", None)
-                _mode_lbl = "Advanced" if getattr(_m, "use_mle", False) else "Fast"
                 _win_lbl  = f"{_m.training_window} season(s)" if getattr(_m, "training_window", None) else "all seasons"
                 _date_str = _trained.strftime("%d %b %Y %H:%M") if _trained else "unknown"
-                st.caption(f"Model: **{_mode_lbl}**, window **{_win_lbl}**, trained {_date_str}")
+                st.caption(f"Model: **Dixon-Coles**, window **{_win_lbl}**, trained {_date_str}")
             except Exception:
                 pass
 
@@ -972,7 +722,7 @@ This is critical — without it, early-season leaders would get no advantage.
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "Forecast":
     _stepper()
-    st.title("Step 5 — Forecast")
+    st.title("Step 4 — Forecast")
 
     if not st.session_state.sim_complete:
         _blocked("Simulate", "Run a simulation first to see the season forecast.")
@@ -1283,7 +1033,7 @@ elif page == "Update":
 
     # ── Idle — show start UI ──────────────────────────────────────────────────
     if upd_step is None:
-        st.caption("Fetch fresh data → CV → train model → 10 000 simulations → Predictions")
+        st.caption("Fetch fresh data → train model → 10 000 simulations → Predictions")
 
         current_year   = pd.Timestamp.now().year
         data_age_hours = None
@@ -1371,9 +1121,9 @@ elif page == "Update":
 
             if skip_fetch:
                 bar.progress(100, text="Skipped (data < 1h old)")
-                _log("Step 1/4 — Data", "skipped",
+                _log("Step 1/3 — Data", "skipped",
                      f"data is {data_age_hours * 60:.0f} min old (< 1 hour)")
-                _advance("cv")
+                _advance("model")
 
             try:
                 bar.progress(10, text="Connecting to football-data.co.uk…")
@@ -1412,9 +1162,9 @@ elif page == "Update":
                 st.session_state.data_loaded = True
 
                 bar.progress(100, text="Done")
-                _log("Step 1/4 — Data", "complete",
+                _log("Step 1/3 — Data", "complete",
                      f"{len(cur_results)} matches fetched · {len(cur_fixtures)} upcoming fixtures")
-                _advance("cv")
+                _advance("model")
 
             except Exception as e:
                 bar.progress(100, text="Failed")
@@ -1422,49 +1172,13 @@ elif page == "Update":
                 st.session_state.upd_step = "done"
                 st.rerun()
 
-        # ── Step 2: CV ────────────────────────────────────────────────────────
-        elif upd_step == "cv":
-            st.subheader("Step 2/4 — Cross-validation")
-            bar      = st.progress(0, text="Loading results…")
-            bar_text = st.empty()
-
-            try:
-                all_results = _load_results()
-                bar.progress(5, text="Running walk-forward CV…")
-
-                def _cv_cb(frac):
-                    pct = int(5 + frac * 90)
-                    bar.progress(pct, text=f"CV fits: {int(frac * 100)}%")
-
-                cv_out    = PoissonModel.walk_forward_cv(all_results, progress_callback=_cv_cb)
-                hist_cv   = cv_out.get("historical", [])
-                optimal_k = min(hist_cv, key=lambda r: r["log_loss"])["lookback"] if hist_cv else None
-                window_str = f"{optimal_k} season(s)" if optimal_k else "all seasons"
-
-                st.session_state["cv_results"]      = cv_out
-                st.session_state["cv_optimal_k"]    = optimal_k
-                st.session_state["selected_window"] = optimal_k
-                st.session_state["cv_complete"]     = True
-                _save_cv_cache(cv_out, optimal_k, optimal_k)
-
-                bar.progress(100, text="Done")
-                _log("Step 2/4 — CV", "complete", f"optimal window: {window_str}")
-                _advance("model")
-
-            except Exception as e:
-                bar.progress(100, text="Failed")
-                _log("Step 2/4 — CV", "error", str(e))
-                st.session_state.upd_step = "done"
-                st.rerun()
-
-        # ── Step 3: Model ─────────────────────────────────────────────────────
+        # ── Step 2: Model ─────────────────────────────────────────────────────
         elif upd_step == "model":
-            st.subheader("Step 3/4 — Training model (advanced)")
+            st.subheader("Step 2/3 — Training model")
             bar = st.progress(0, text="Loading data…")
 
             try:
-                train_k = st.session_state.get("selected_window")
-                results = _filter_by_window(_load_results(), train_k)
+                results = _load_results()
 
                 bar.progress(20, text="Calculating team strengths…")
                 strength_calc = TeamStrengthCalculator(use_odds_integration=False)
@@ -1472,10 +1186,9 @@ elif page == "Update":
                 TEAM_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
                 team_stats.to_csv(TEAM_STATS_PATH)
 
-                bar.progress(50, text="Fitting Poisson model (MLE + Dixon-Coles)…")
-                model = PoissonModel(use_mle=True, use_dixon_coles=True)
+                bar.progress(50, text="Fitting Dixon-Coles model…")
+                model = PoissonModel()
                 model.fit(results, team_stats)
-                model.training_window = train_k
 
                 bar.progress(90, text="Saving model…")
                 MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1484,20 +1197,19 @@ elif page == "Update":
 
                 n_teams = len(model.attack_rates)
                 bar.progress(100, text="Done")
-                _log("Step 3/4 — Model", "complete",
-                     f"{n_teams} teams · {len(results)} matches · window: "
-                     f"{train_k} season(s)" if train_k else "all seasons")
+                _log("Step 2/3 — Model", "complete",
+                     f"{n_teams} teams · {len(results)} matches")
                 _advance("sim")
 
             except Exception as e:
                 bar.progress(100, text="Failed")
-                _log("Step 3/4 — Model", "error", str(e))
+                _log("Step 2/3 — Model", "error", str(e))
                 st.session_state.upd_step = "done"
                 st.rerun()
 
-        # ── Step 4: Simulate ──────────────────────────────────────────────────
+        # ── Step 3: Simulate ──────────────────────────────────────────────────
         elif upd_step == "sim":
-            st.subheader("Step 4/4 — Simulating 10 000 seasons")
+            st.subheader("Step 3/3 — Simulating 10 000 seasons")
             bar = st.progress(0, text="Loading model and fixtures…")
 
             try:
@@ -1538,12 +1250,12 @@ elif page == "Update":
                 st.session_state.sim_complete = True
 
                 bar.progress(100, text="Done")
-                _log("Step 4/4 — Simulate", "complete", "10 000 simulations complete")
+                _log("Step 3/3 — Simulate", "complete", "10 000 simulations complete")
                 st.session_state.upd_step = "done"
                 st.rerun()
 
             except Exception as e:
                 bar.progress(100, text="Failed")
-                _log("Step 4/4 — Simulate", "error", str(e))
+                _log("Step 3/3 — Simulate", "error", str(e))
                 st.session_state.upd_step = "done"
                 st.rerun()
