@@ -1048,7 +1048,6 @@ elif page == "Predictions":
     padding: 10px 0;
     border-bottom: 1px solid #e0e0e0;
 }
-.match-card-hl { background: #fff8e1; border-radius: 6px; padding: 10px 6px; }
 .match-team { flex: 1 1 30%; min-width: 80px; }
 .match-team-away { text-align: right; }
 .match-center { flex: 1 1 30%; min-width: 120px; text-align: center; }
@@ -1063,19 +1062,20 @@ elif page == "Predictions":
         aw   = float(r["Away Win"]) * 100
         xgh  = float(r["xG Home"])
         xga  = float(r["xG Away"])
-        hl   = team1 != "All teams" and (r["Home"] == team1 or r["Away"] == team1)
-        card_cls = "match-card match-card-hl" if hl else "match-card"
-        home_lbl = f"<strong>⭐ {r['Home']}</strong>" if (hl and r["Home"] == team1) else f"<strong>{r['Home']}</strong>"
-        away_lbl = f"<strong>⭐ {r['Away']}</strong>" if (hl and r["Away"] == team1) else f"<strong>{r['Away']}</strong>"
+        t1_home = team1 != "All teams" and r["Home"] == team1
+        t1_away = team1 != "All teams" and r["Away"] == team1
+        hw_str = f"<strong>{hw:.0f}%</strong>" if t1_home else f"{hw:.0f}%"
+        aw_str = f"<strong>{aw:.0f}%</strong>" if t1_away else f"{aw:.0f}%"
+        dw_str = f"{dw:.0f}%"
         cards_html.append(f"""
-<div class="{card_cls}">
+<div class="match-card">
   <div class="match-team">
-    {home_lbl}<br>
+    <strong>{r['Home']}</strong><br>
     <span style="color:#888;font-size:0.8em">xG {xgh:.2f}</span>
   </div>
   <div class="match-center">
     <div style="color:#888;font-size:0.75em;margin-bottom:4px">{r['Date']}</div>
-    <div style="font-size:1em;margin-bottom:6px">{hw:.0f}% · {dw:.0f}% · {aw:.0f}%</div>
+    <div style="font-size:1em;margin-bottom:6px">{hw_str} · {dw_str} · {aw_str}</div>
     <div style="display:flex;height:10px;border-radius:4px;overflow:hidden">
       <div style="width:{hw:.1f}%;background:#2196F3"></div>
       <div style="width:{dw:.1f}%;background:#9E9E9E"></div>
@@ -1086,7 +1086,7 @@ elif page == "Predictions":
     </div>
   </div>
   <div class="match-team match-team-away">
-    {away_lbl}<br>
+    <strong>{r['Away']}</strong><br>
     <span style="color:#888;font-size:0.8em">xG {xga:.2f}</span>
   </div>
 </div>""")
@@ -1097,10 +1097,15 @@ elif page == "Predictions":
     # ── Table view ────────────────────────────────────────────────────────────
     st.subheader("All Fixtures")
 
-    def _highlight_team1(row):
-        if team1 != "All teams" and (row["Home"] == team1 or row["Away"] == team1):
-            return ["background-color: #fff8e1"] * len(row)
-        return [""] * len(row)
+    def _bold_team1_odds(row):
+        styles = [""] * len(row)
+        cols   = list(row.index)
+        if team1 != "All teams":
+            if row.get("Home") == team1 and "Home Win" in cols:
+                styles[cols.index("Home Win")] = "font-weight: bold"
+            elif row.get("Away") == team1 and "Away Win" in cols:
+                styles[cols.index("Away Win")] = "font-weight: bold"
+        return styles
 
     table_df = disp_df.copy()
     table_df["Home Win"] = table_df["Home Win"].map(lambda x: f"{x:.0%}")
@@ -1108,7 +1113,7 @@ elif page == "Predictions":
     table_df["Away Win"] = table_df["Away Win"].map(lambda x: f"{x:.0%}")
     table_df["xG Home"]  = table_df["xG Home"].map(lambda x: f"{x:.2f}")
     table_df["xG Away"]  = table_df["xG Away"].map(lambda x: f"{x:.2f}")
-    styled = table_df.style.apply(_highlight_team1, axis=1)
+    styled = table_df.style.apply(_bold_team1_odds, axis=1)
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
