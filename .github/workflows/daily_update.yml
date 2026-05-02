@@ -5,6 +5,12 @@ on:
     - cron: "0 3 * * *"   # 03:00 UTC every day
   workflow_dispatch:        # allow manual trigger from GitHub UI
 
+permissions:
+  contents: write           # needed to push the updated data files back
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # silence Node.js 20 deprecation warning
+
 jobs:
   update:
     runs-on: ubuntu-latest
