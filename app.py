@@ -1064,8 +1064,8 @@ elif page == "Predictions":
         xga  = float(r["xG Away"])
         t1_home = team1 != "All teams" and r["Home"] == team1
         t1_away = team1 != "All teams" and r["Away"] == team1
-        hw_str = f"<strong>{hw:.0f}%</strong>" if t1_home else f"{hw:.0f}%"
-        aw_str = f"<strong>{aw:.0f}%</strong>" if t1_away else f"{aw:.0f}%"
+        hw_str = f"<span style='font-weight:900;color:#111'>{hw:.0f}%</span>" if t1_home else f"{hw:.0f}%"
+        aw_str = f"<span style='font-weight:900;color:#111'>{aw:.0f}%</span>" if t1_away else f"{aw:.0f}%"
         dw_str = f"{dw:.0f}%"
         cards_html.append(f"""
 <div class="match-card">
@@ -1102,9 +1102,9 @@ elif page == "Predictions":
         cols   = list(row.index)
         if team1 != "All teams":
             if row.get("Home") == team1 and "Home Win" in cols:
-                styles[cols.index("Home Win")] = "font-weight: bold"
+                styles[cols.index("Home Win")] = "font-weight: 900; color: #111"
             elif row.get("Away") == team1 and "Away Win" in cols:
-                styles[cols.index("Away Win")] = "font-weight: bold"
+                styles[cols.index("Away Win")] = "font-weight: 900; color: #111"
         return styles
 
     table_df = disp_df.copy()
