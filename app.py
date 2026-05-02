@@ -63,7 +63,7 @@ STEPS = [
 
 def _nav(page: str):
     st.session_state.active_page = page
-    st.rerun()
+    # No st.rerun() here — button on_click callbacks trigger a rerun automatically.
 
 def _step_done(key: str) -> bool:
     return bool(st.session_state.get(key, False))
@@ -1137,10 +1137,21 @@ elif page == "Update":
             except Exception:
                 pass
 
+        # history_ok: accept either a dedicated historical file OR results.csv
+        # that already contains multiple seasons (i.e. historical was merged in previously).
         history_ok = False
         if HISTORICAL_PATH.exists():
             try:
                 history_ok = len(pd.read_csv(HISTORICAL_PATH)) > 0
+            except Exception:
+                pass
+        if not history_ok and RESULTS_PATH.exists():
+            try:
+                _r = pd.read_csv(RESULTS_PATH)
+                if "SeasonStart" in _r.columns:
+                    history_ok = _r["SeasonStart"].nunique() > 1
+                else:
+                    history_ok = len(_r) > 100  # enough rows to imply historical data
             except Exception:
                 pass
 
