@@ -47,3 +47,23 @@ jobs:
 
       - name: Push
         run: git push
+
+  ping:
+    runs-on: ubuntu-latest
+    # Run after update so the app has fresh data before we wake it
+    needs: update
+    if: always()   # ping even if update had no new data to commit
+
+    steps:
+      - name: Wake Streamlit app
+        # STREAMLIT_APP_URL must be set as a GitHub Actions variable:
+        # Repo → Settings → Secrets and variables → Actions → Variables → New
+        # e.g. https://yourapp.streamlit.app
+        run: |
+          URL="${{ vars.STREAMLIT_APP_URL }}"
+          if [ -z "$URL" ]; then
+            echo "STREAMLIT_APP_URL not set — skipping ping"
+            exit 0
+          fi
+          echo "Pinging $URL"
+          curl -sf --max-time 30 "$URL" -o /dev/null && echo "App is up" || echo "App returned non-200 (may be waking up)"

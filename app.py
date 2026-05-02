@@ -929,15 +929,13 @@ elif page == "Forecast":
                 x=[f"#{p+1}" for p in range(n_pos)],
                 y=teams_ordered,
                 colorscale="Blues",
-                text=np.round(matrix * 100, 1),
-                texttemplate="%{text:.0f}%",
-                textfont={"size": 9},
                 showscale=True,
-                colorbar=dict(title="Prob %"),
+                colorbar=dict(title="Probability (%)"),
+                hovertemplate="%{y} → position %{x}: %{z:.1f}%<extra></extra>",
             ))
             fig.update_layout(
                 xaxis_title="Final Position", yaxis_title="",
-                height=max(400, n_pos * 30),
+                height=max(400, n_pos * 36),
                 margin=dict(l=10, r=10, t=10, b=10),
                 yaxis=dict(autorange="reversed"),
             )
@@ -969,31 +967,23 @@ elif page == "Predictions":
         st.error(f"Could not load model: {e}")
         st.stop()
 
-    # ── Filters ───────────────────────────────────────────────────────────────
     all_teams = sorted(set(fixtures["HomeTeam"]) | set(fixtures["AwayTeam"]))
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        team_filter = st.selectbox("Filter by team", ["All teams"] + all_teams)
-    with col_f2:
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        team1 = fc1.selectbox("Team 1 (highlight)", ["All teams"] + all_teams, key="pred_team1")
+    with fc2:
+        team2_opts = ["All teams"] + [t for t in all_teams if t != team1] if team1 != "All teams" else ["All teams"] + all_teams
+        team2 = fc2.selectbox("Team 2", team2_opts, key="pred_team2")
+    with fc3:
         if "Date" in fixtures.columns and fixtures["Date"].notna().any():
             dates       = sorted(fixtures["Date"].dt.date.dropna().unique())
-            date_filter = st.selectbox("Filter by date", ["All dates"] + [str(d) for d in dates])
+            date_filter = fc3.selectbox("Date", ["All dates"] + [str(d) for d in dates], key="pred_date")
         else:
             date_filter = "All dates"
 
-    disp = fixtures.copy()
-    if team_filter != "All teams":
-        disp = disp[(disp["HomeTeam"] == team_filter) | (disp["AwayTeam"] == team_filter)]
-    if date_filter != "All dates":
-        disp = disp[disp["Date"].dt.date.astype(str) == date_filter]
-
-    st.caption(f"Showing {len(disp)} fixture{'s' if len(disp) != 1 else ''}")
-
-    if disp.empty:
-        st.info("No fixtures match the selected filters.")
-        st.stop()
-
-    # ── Build predictions ─────────────────────────────────────────────────────
+    # ── Build predictions for ALL fixtures (cache stays valid across filter changes) ──
     @st.cache_data(show_spinner=False)
     def _predict_fixtures(fixture_records: tuple, model_mtime: float):
         rows = []
@@ -1015,35 +1005,39 @@ elif page == "Predictions":
         return rows
 
     _model_mtime = MODEL_PATH.stat().st_mtime if MODEL_PATH.exists() else 0
-    _fixture_records = tuple(
-        (
-            r["HomeTeam"],
-            r["AwayTeam"],
-            r["Date"].date() if pd.notna(r.get("Date")) else "—",
-        )
-        for _, r in disp.iterrows()
+    _all_records = tuple(
+        (r["HomeTeam"], r["AwayTeam"], r["Date"].date() if pd.notna(r.get("Date")) else "—")
+        for _, r in fixtures.iterrows()
     )
-    rows = _predict_fixtures(_fixture_records, _model_mtime)
+    all_rows = _predict_fixtures(_all_records, _model_mtime)
 
-    if not rows:
+    if not all_rows:
         st.info("No predictions could be generated.")
         st.stop()
 
-    pred_df = pd.DataFrame(rows)
+    pred_df = pd.DataFrame(all_rows)
 
-    # ── Table view ────────────────────────────────────────────────────────────
-    st.subheader("All Fixtures")
-    table_df = pred_df.copy()
-    table_df["Home Win"] = table_df["Home Win"].map(lambda x: f"{x:.0%}")
-    table_df["Draw"]     = table_df["Draw"].map(lambda x: f"{x:.0%}")
-    table_df["Away Win"] = table_df["Away Win"].map(lambda x: f"{x:.0%}")
-    table_df["xG Home"]  = table_df["xG Home"].map(lambda x: f"{x:.2f}")
-    table_df["xG Away"]  = table_df["xG Away"].map(lambda x: f"{x:.2f}")
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    # Apply filters
+    disp_df = pred_df.copy()
+    if team1 != "All teams" and team2 != "All teams":
+        disp_df = disp_df[
+            ((disp_df["Home"] == team1) & (disp_df["Away"] == team2)) |
+            ((disp_df["Home"] == team2) & (disp_df["Away"] == team1))
+        ]
+    elif team1 != "All teams":
+        disp_df = disp_df[(disp_df["Home"] == team1) | (disp_df["Away"] == team1)]
+    elif team2 != "All teams":
+        disp_df = disp_df[(disp_df["Home"] == team2) | (disp_df["Away"] == team2)]
+    if date_filter != "All dates":
+        disp_df = disp_df[disp_df["Date"].astype(str) == date_filter]
 
-    st.divider()
+    st.caption(f"Showing {len(disp_df)} fixture{'s' if len(disp_df) != 1 else ''}")
 
-    # ── Match cards ───────────────────────────────────────────────────────────
+    if disp_df.empty:
+        st.info("No fixtures match the selected filters.")
+        st.stop()
+
+    # ── Match cards (above the table) ─────────────────────────────────────────
     st.subheader("Match Details")
     cards_html = ["""<style>
 .match-card {
@@ -1054,6 +1048,7 @@ elif page == "Predictions":
     padding: 10px 0;
     border-bottom: 1px solid #e0e0e0;
 }
+.match-card-hl { background: #fff8e1; border-radius: 6px; padding: 10px 6px; }
 .match-team { flex: 1 1 30%; min-width: 80px; }
 .match-team-away { text-align: right; }
 .match-center { flex: 1 1 30%; min-width: 120px; text-align: center; }
@@ -1062,16 +1057,20 @@ elif page == "Predictions":
     .match-team, .match-team-away, .match-center { text-align: left; min-width: unset; }
 }
 </style>"""]
-    for r in pred_df.to_dict("records"):
-        hw  = float(r["Home Win"]) * 100
-        dw  = float(r["Draw"])    * 100
-        aw  = float(r["Away Win"]) * 100
-        xgh = float(r["xG Home"])
-        xga = float(r["xG Away"])
+    for r in disp_df.to_dict("records"):
+        hw   = float(r["Home Win"]) * 100
+        dw   = float(r["Draw"])     * 100
+        aw   = float(r["Away Win"]) * 100
+        xgh  = float(r["xG Home"])
+        xga  = float(r["xG Away"])
+        hl   = team1 != "All teams" and (r["Home"] == team1 or r["Away"] == team1)
+        card_cls = "match-card match-card-hl" if hl else "match-card"
+        home_lbl = f"<strong>⭐ {r['Home']}</strong>" if (hl and r["Home"] == team1) else f"<strong>{r['Home']}</strong>"
+        away_lbl = f"<strong>⭐ {r['Away']}</strong>" if (hl and r["Away"] == team1) else f"<strong>{r['Away']}</strong>"
         cards_html.append(f"""
-<div class="match-card">
+<div class="{card_cls}">
   <div class="match-team">
-    <strong>{r['Home']}</strong><br>
+    {home_lbl}<br>
     <span style="color:#888;font-size:0.8em">xG {xgh:.2f}</span>
   </div>
   <div class="match-center">
@@ -1087,11 +1086,30 @@ elif page == "Predictions":
     </div>
   </div>
   <div class="match-team match-team-away">
-    <strong>{r['Away']}</strong><br>
+    {away_lbl}<br>
     <span style="color:#888;font-size:0.8em">xG {xga:.2f}</span>
   </div>
 </div>""")
     st.markdown("\n".join(cards_html), unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Table view ────────────────────────────────────────────────────────────
+    st.subheader("All Fixtures")
+
+    def _highlight_team1(row):
+        if team1 != "All teams" and (row["Home"] == team1 or row["Away"] == team1):
+            return ["background-color: #fff8e1"] * len(row)
+        return [""] * len(row)
+
+    table_df = disp_df.copy()
+    table_df["Home Win"] = table_df["Home Win"].map(lambda x: f"{x:.0%}")
+    table_df["Draw"]     = table_df["Draw"].map(lambda x: f"{x:.0%}")
+    table_df["Away Win"] = table_df["Away Win"].map(lambda x: f"{x:.0%}")
+    table_df["xG Home"]  = table_df["xG Home"].map(lambda x: f"{x:.2f}")
+    table_df["xG Away"]  = table_df["xG Away"].map(lambda x: f"{x:.2f}")
+    styled = table_df.style.apply(_highlight_team1, axis=1)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
