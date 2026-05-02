@@ -1071,7 +1071,7 @@ elif page == "Predictions":
 <div class="match-card">
   <div class="match-team">
     <strong>{r['Home']}</strong><br>
-    <span style="color:#888;font-size:0.8em">xG {xgh:.2f}</span>
+    <span style="font-size:0.8em">xG {xgh:.2f}</span>
   </div>
   <div class="match-center">
     <div style="color:#888;font-size:0.75em;margin-bottom:4px">{r['Date']}</div>
@@ -1087,7 +1087,7 @@ elif page == "Predictions":
   </div>
   <div class="match-team match-team-away">
     <strong>{r['Away']}</strong><br>
-    <span style="color:#888;font-size:0.8em">xG {xga:.2f}</span>
+    <span style="font-size:0.8em">xG {xga:.2f}</span>
   </div>
 </div>""")
     st.markdown("\n".join(cards_html), unsafe_allow_html=True)
