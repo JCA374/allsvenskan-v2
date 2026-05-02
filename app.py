@@ -872,7 +872,7 @@ elif page == "Forecast":
     if "Pts ±" in tbl.columns:
         fmt["Pts ±"] = "±{:.1f}"
 
-    st.dataframe(tbl.style.apply(_row_color, axis=1).format(fmt), use_container_width=True, hide_index=True, height=(len(tbl) + 1) * 35 + 3)
+    st.dataframe(tbl.style.apply(_row_color, axis=1).format(fmt), use_container_width=True, hide_index=True)
 
     legend_cols = st.columns(3)
     legend_cols[0].caption("🟡 1st — Champions League")
@@ -905,8 +905,10 @@ elif page == "Forecast":
         fig.update_traces(textposition="outside")
         fig.update_layout(
             xaxis_title="Probability (%)", yaxis_title="",
-            margin=dict(l=10, r=20, t=20, b=10),
-            height=max(300, len(df) * 32), showlegend=False,
+            margin=dict(l=10, r=40, t=10, b=10),
+            # Row height capped at 40px so the chart stays within the viewport
+            height=min(max(250, len(df) * 36), 600),
+            showlegend=False,
         )
         return fig
 
@@ -935,7 +937,7 @@ elif page == "Forecast":
             ))
             fig.update_layout(
                 xaxis_title="Final Position", yaxis_title="",
-                height=max(400, n_pos * 36),
+                height=min(max(400, n_pos * 36), 700),
                 margin=dict(l=10, r=10, t=10, b=10),
                 yaxis=dict(autorange="reversed"),
             )
