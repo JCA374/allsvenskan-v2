@@ -7,6 +7,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.data.scraper import AllsvenskanScraper
 from core.data.cleaner import DataCleaner
@@ -40,6 +41,29 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# Prevent iOS keyboard from appearing when tapping a selectbox.
+# Streamlit selectboxes render as searchable <input> elements; iOS pops the
+# keyboard for any focusable input. Setting inputmode="none" suppresses it.
+# The MutationObserver re-applies the attribute after every Streamlit rerun.
+components.html("""
+<script>
+(function () {
+    function patch() {
+        window.parent.document
+            .querySelectorAll('[data-baseweb="select"] input')
+            .forEach(function (el) {
+                el.setAttribute('inputmode', 'none');
+            });
+    }
+    patch();
+    new MutationObserver(patch).observe(
+        window.parent.document.body,
+        { childList: true, subtree: true }
+    );
+})();
+</script>
+""", height=0)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 RESULTS_PATH   = Path("data/clean/results.csv")
