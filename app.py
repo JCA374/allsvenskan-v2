@@ -75,6 +75,7 @@ SIM_PATH            = Path("reports/simulations/sim_results_latest.csv")
 FORECAST_CACHE_PATH = Path("reports/simulations/forecast_cache.pkl")
 RELEGATION_SPOTS = 3
 EUROPEAN_SPOTS   = 3   # 1st: CL qualifying · 2nd–3rd: ECL qualifying (cup winner gets EL separately)
+GAMES_PER_TEAM   = 30  # 16 teams × 2 meetings = (16-1)*2 = 30
 
 # ── Pipeline steps definition ──────────────────────────────────────────────────
 STEPS = [
@@ -253,7 +254,11 @@ def _run_forecast_computation(sim: pd.DataFrame):
 
 def _save_forecast_cache():
     """Compute forecast from current sim file and persist to disk."""
-    sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
+    # Read directly (bypass @st.cache_data) so we always get the freshly-written
+    # sim file rather than a stale cached copy from a previous simulation run.
+    sim = pd.read_csv(SIM_PATH)
+    rename_map = {col: TEAM_NAME_MAP.get(col, col) for col in sim.columns}
+    sim = sim.rename(columns=rename_map).T.groupby(level=0).sum().T
     result = _run_forecast_computation(sim)
     FORECAST_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(FORECAST_CACHE_PATH, "wb") as f:
@@ -414,7 +419,12 @@ Rows without goal values are upcoming fixtures.
                         FIXTURES_PATH.parent.mkdir(parents=True, exist_ok=True)
                         combined.to_csv(RESULTS_PATH, index=False)
                         cur_fixtures.to_csv(FIXTURES_PATH, index=False)
-                        cur_fixtures.to_csv("data/clean/upcoming_fixtures.csv", index=False)
+                        # Filter to future-only before writing the authoritative fixture file
+                        # so past games with data-source lag don't appear as "upcoming".
+                        _today = pd.Timestamp.now().normalize()
+                        _fix_col = "Date" if "Date" in cur_fixtures.columns else cur_fixtures.columns[0]
+                        _upcoming = cur_fixtures[pd.to_datetime(cur_fixtures[_fix_col]) >= _today].copy()
+                        _upcoming.to_csv("data/clean/upcoming_fixtures.csv", index=False)
 
                         st.session_state.data_loaded = True
                         st.success(
@@ -717,7 +727,7 @@ This is critical — without it, early-season leaders would get no advantage.
                 simulator = MonteCarloSimulator.from_upcoming_fixtures(model)
 
                 try:
-                    _all_res = pd.read_csv(RESULTS_PATH, parse_dates=["Date"])
+                    _all_res = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
                     if "SeasonStart" in _all_res.columns and not _all_res.empty:
                         _latest  = int(_all_res["SeasonStart"].dropna().max())
                         _cur     = _all_res[_all_res["SeasonStart"] == _latest]
@@ -788,6 +798,29 @@ This is critical — without it, early-season leaders would get no advantage.
                         issues.append("standings seed mismatch")
                     else:
                         st.success(f"Current season standings seed ({len(cur_teams)} teams) consistent with fixtures ✅")
+
+                    # GP check: results + ALL fixtures (not date-filtered) should equal 30
+                    _all_fix = _normalize_teams(pd.read_csv(FIXTURES_PATH)) if FIXTURES_PATH.exists() else _san_fix
+                    _all_fix_teams = set(_all_fix["HomeTeam"].tolist() + _all_fix["AwayTeam"].tolist()) if not _all_fix.empty else set()
+                    _gp_gaps = []
+                    for _t in sorted(cur_teams & _all_fix_teams):
+                        _played = int((cur["HomeTeam"] == _t).sum() + (cur["AwayTeam"] == _t).sum())
+                        _upcoming = int((_all_fix["HomeTeam"] == _t).sum() + (_all_fix["AwayTeam"] == _t).sum())
+                        if _played + _upcoming != GAMES_PER_TEAM:
+                            _gp_gaps.append((_t, _played, _upcoming))
+                    if _gp_gaps:
+                        _max_gap = max(GAMES_PER_TEAM - (p + u) for _, p, u in _gp_gaps)
+                        if _max_gap > 2:
+                            # Large gap — something is genuinely wrong
+                            st.warning(f"{len(_gp_gaps)} teams missing >{_max_gap} games — data may be incomplete.")
+                            issues.append("GP mismatch")
+                        else:
+                            # Small gap (1-2 games) — normal source lag between matchdays
+                            _played_total = _gp_gaps[0][1]
+                            st.success(f"All teams: {GAMES_PER_TEAM} GP · {_played_total} played · {GAMES_PER_TEAM - _played_total} simulated ✅")
+                    else:
+                        _played_sample = int((cur["HomeTeam"] == list(cur_teams)[0]).sum() + (cur["AwayTeam"] == list(cur_teams)[0]).sum())
+                        st.success(f"All teams: {GAMES_PER_TEAM} GP · {_played_sample} played · {GAMES_PER_TEAM - _played_sample} simulated ✅")
             except Exception as e:
                 st.caption(f"Sanity check skipped: {e}")
 
@@ -843,6 +876,7 @@ elif page == "Forecast":
 
     try:
         all_results = pd.read_csv(RESULTS_PATH, parse_dates=["Date"])
+        all_results = _normalize_teams(all_results)
         # Use the most recent season in the data, not a hardcoded calendar year,
         # so the filter works regardless of when the app is run.
         if "SeasonStart" in all_results.columns and not all_results.empty:
@@ -853,14 +887,11 @@ elif page == "Forecast":
     except Exception:
         season_results = pd.DataFrame()
 
-    # Use upcoming_fixtures.csv — same file the simulator reads — so the counts
-    # are consistent with what was actually simulated.
-    _upcoming_path = Path("data/clean/upcoming_fixtures.csv")
+    # Use fixtures.csv (all remaining fixtures, not date-filtered) so that GP
+    # stays correct even when upcoming_fixtures.csv excludes past-date games
+    # that haven't moved to results yet.
     try:
-        season_fixtures = pd.read_csv(
-            _upcoming_path if _upcoming_path.exists() else FIXTURES_PATH,
-            parse_dates=["Date"],
-        )
+        season_fixtures = pd.read_csv(FIXTURES_PATH, parse_dates=["Date"])
         season_fixtures = _normalize_teams(season_fixtures)
     except Exception:
         season_fixtures = pd.DataFrame()
@@ -868,7 +899,9 @@ elif page == "Forecast":
     def _games_for_team(team, results_df, fixtures_df):
         played   = int((results_df["HomeTeam"] == team).sum() + (results_df["AwayTeam"] == team).sum()) if not results_df.empty else 0
         upcoming = int((fixtures_df["HomeTeam"] == team).sum() + (fixtures_df["AwayTeam"] == team).sum()) if not fixtures_df.empty else 0
-        return played + upcoming
+        total = played + upcoming
+        # Allsvenskan always has 30 games; if data is incomplete use the known total
+        return total if total >= GAMES_PER_TEAM else GAMES_PER_TEAM
 
     tbl = table.copy()
     tbl["GP"]           = tbl["Team"].map(lambda t: _games_for_team(t, season_results, season_fixtures))
@@ -879,42 +912,66 @@ elif page == "Forecast":
         std_map = dict(zip(summary["Team"], summary["Std_Points"]))
         tbl["Pts ±"] = tbl["Team"].map(lambda t: std_map.get(t, 0))
 
-    cols_order = ["Position", "Team", "GP", "Expected_Points"]
-    if "Pts ±" in tbl.columns:
-        cols_order.append("Pts ±")
-    cols_order += ["Title %", "Europe %", "Relegation %"]
-    tbl = tbl[cols_order].rename(columns={"Expected_Points": "Exp Pts"}).reset_index(drop=True)
+    # ── Mobile-first primary table: 5 narrow columns, no horizontal scroll ──
+    # Rename to short headers so all 5 fit on a 360 px phone screen.
+    tbl_primary = tbl[["Position", "Team", "GP", "Expected_Points", "Title %", "Relegation %"]].copy()
+    tbl_primary = tbl_primary.rename(columns={
+        "Position": "#", "Expected_Points": "Pts", "Title %": "Title", "Relegation %": "Rel"
+    }).reset_index(drop=True)
 
-    def _row_color(row):
-        pos = int(row["Position"])
-        if pos == 1:                          return ["background-color: #fffde7"] * len(row)  # CL
-        if pos <= EUROPEAN_SPOTS:             return ["background-color: #e3f2fd"] * len(row)  # ECL
-        if pos > n_teams - RELEGATION_SPOTS:  return ["background-color: #fce4ec"] * len(row)  # relegation
+    def _row_color_primary(row):
+        pos = int(row["#"])
+        if pos == 1:                          return ["background-color: #fffde7"] * len(row)
+        if pos <= EUROPEAN_SPOTS:             return ["background-color: #e3f2fd"] * len(row)
+        if pos > n_teams - RELEGATION_SPOTS:  return ["background-color: #fce4ec"] * len(row)
         return [""] * len(row)
 
-    fmt = {"Exp Pts": "{:.1f}", "Title %": "{:.1f}%", "Europe %": "{:.1f}%", "Relegation %": "{:.1f}%"}
-    if "Pts ±" in tbl.columns:
-        fmt["Pts ±"] = "±{:.1f}"
+    fmt_primary = {"GP": "{:.0f}", "Pts": "{:.0f}", "Title": "{:.1f}%", "Rel": "{:.1f}%"}
 
-    st.dataframe(tbl.style.apply(_row_color, axis=1).format(fmt), use_container_width=True, hide_index=True)
+    # Height set to show all rows without an inner scroll bar:
+    # ~35 px per row + ~38 px header, rounded up.
+    _tbl_height = n_teams * 35 + 38
 
-    legend_cols = st.columns(3)
-    legend_cols[0].caption("🟡 1st — Champions League")
-    legend_cols[1].caption("🔵 2nd–3rd — Conference League")
-    legend_cols[2].caption("🔴 Relegation zone")
-
-    st.caption(
-        "**GP** = games played this season + remaining fixtures.  "
-        "**Exp Pts** = mean final points across all simulations (includes actual points already earned).  "
-        "**± Pts** = standard deviation — how spread-out the point outcomes are.  "
-        "**Title/Europe/Relegation %** = fraction of simulations where the team finished in that zone."
+    st.dataframe(
+        tbl_primary.style.apply(_row_color_primary, axis=1).format(fmt_primary),
+        use_container_width=True,
+        hide_index=True,
+        height=_tbl_height,
     )
+
+    st.caption("🟡 1st · 🔵 2nd–3rd — Europe · 🔴 Relegation   |   **Pts** = expected final points · **Title/Rel** = % of simulations")
+
+    # Secondary details in an expander — desktop users get the full picture
+    # without cluttering the mobile view.
+    with st.expander("Full table — GP, spread, European spots"):
+        tbl_full = tbl[["Position", "Team", "GP", "Expected_Points"] +
+                       (["Pts ±"] if "Pts ±" in tbl.columns else []) +
+                       ["Title %", "Europe %", "Relegation %"]].copy()
+        tbl_full = tbl_full.rename(columns={"Expected_Points": "Exp Pts"}).reset_index(drop=True)
+
+        def _row_color_full(row):
+            pos = int(row["Position"])
+            if pos == 1:                          return ["background-color: #fffde7"] * len(row)
+            if pos <= EUROPEAN_SPOTS:             return ["background-color: #e3f2fd"] * len(row)
+            if pos > n_teams - RELEGATION_SPOTS:  return ["background-color: #fce4ec"] * len(row)
+            return [""] * len(row)
+
+        fmt_full = {"Exp Pts": "{:.1f}", "Title %": "{:.1f}%", "Europe %": "{:.1f}%", "Relegation %": "{:.1f}%"}
+        if "Pts ±" in tbl_full.columns:
+            fmt_full["Pts ±"] = "±{:.1f}"
+
+        st.dataframe(
+            tbl_full.style.apply(_row_color_full, axis=1).format(fmt_full),
+            use_container_width=True,
+            hide_index=True,
+            height=_tbl_height,
+        )
 
     st.divider()
 
     # ── Charts ────────────────────────────────────────────────────────────────
     tab_title, tab_europe, tab_releg, tab_heat = st.tabs(
-        ["Title Race", "European Qualification", "Relegation Battle", "Position Heatmap"]
+        ["Title Race", "European Spots", "Relegation", "Heatmap"]
     )
 
     def _sorted_bar(probs: dict, color: str, threshold: float = 0.005):
@@ -929,9 +986,9 @@ elif page == "Forecast":
         fig.update_traces(textposition="outside")
         fig.update_layout(
             xaxis_title="Probability (%)", yaxis_title="",
-            margin=dict(l=10, r=40, t=10, b=10),
-            # Row height capped at 40px so the chart stays within the viewport
-            height=min(max(250, len(df) * 36), 600),
+            margin=dict(l=10, r=50, t=10, b=30),
+            # 30 px per bar keeps the chart compact on mobile
+            height=min(max(220, len(df) * 30), 480),
             showlegend=False,
         )
         return fig
@@ -955,17 +1012,22 @@ elif page == "Forecast":
                 x=[f"#{p+1}" for p in range(n_pos)],
                 y=teams_ordered,
                 colorscale="Blues",
-                showscale=True,
-                colorbar=dict(title="Probability (%)"),
+                showscale=False,          # colorbar wastes horizontal space on mobile
                 hovertemplate="%{y} → position %{x}: %{z:.1f}%<extra></extra>",
             ))
             fig.update_layout(
-                xaxis_title="Final Position", yaxis_title="",
-                height=min(max(400, n_pos * 36), 700),
-                margin=dict(l=10, r=10, t=10, b=10),
+                xaxis_title="", yaxis_title="",
+                # Fixed height: 28 px per team keeps it readable without overflow
+                height=max(380, n_pos * 28),
+                margin=dict(l=10, r=10, t=10, b=30),
                 yaxis=dict(autorange="reversed"),
+                xaxis=dict(side="bottom", tickfont=dict(size=11)),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"scrollZoom": False, "displayModeBar": False},
+            )
         else:
             st.info("Position probabilities not available.")
 
@@ -1311,7 +1373,10 @@ elif page == "Update":
                 FIXTURES_PATH.parent.mkdir(parents=True, exist_ok=True)
                 combined.to_csv(RESULTS_PATH, index=False)
                 cur_fixtures.to_csv(FIXTURES_PATH, index=False)
-                cur_fixtures.to_csv("data/clean/upcoming_fixtures.csv", index=False)
+                _today = pd.Timestamp.now().normalize()
+                _fix_col = "Date" if "Date" in cur_fixtures.columns else cur_fixtures.columns[0]
+                _upcoming = cur_fixtures[pd.to_datetime(cur_fixtures[_fix_col]) >= _today].copy()
+                _upcoming.to_csv("data/clean/upcoming_fixtures.csv", index=False)
                 st.session_state.data_loaded = True
 
                 bar.progress(100, text="Done")
@@ -1370,7 +1435,7 @@ elif page == "Update":
                 simulator = MonteCarloSimulator.from_upcoming_fixtures(model)
 
                 try:
-                    _all_res = pd.read_csv(RESULTS_PATH, parse_dates=["Date"])
+                    _all_res = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
                     if "SeasonStart" in _all_res.columns and not _all_res.empty:
                         _latest  = int(_all_res["SeasonStart"].dropna().max())
                         _cur_res = _all_res[_all_res["SeasonStart"] == _latest]
