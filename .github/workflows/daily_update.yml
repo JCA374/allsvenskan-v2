@@ -2,7 +2,7 @@ name: Daily forecast update
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # 03:00 UTC every day
+    - cron: "0 6 * * *"   # 06:00 UTC every day
   workflow_dispatch:        # allow manual trigger from GitHub UI
 
 permissions:
