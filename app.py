@@ -123,8 +123,8 @@ if not st.session_state.sim_complete and SIM_PATH.exists():
         pass
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
-PUBLIC_PAGES  = {"Forecast", "Predictions"}
-ADMIN_PAGES   = {"Data", "Model", "Simulate", "Update"}
+PUBLIC_PAGES  = {"Forecast", "Predictions", "Model"}
+ADMIN_PAGES   = {"Data", "Simulate", "Update"}
 
 with st.sidebar:
     st.title("⚽ Allsvenskan")
@@ -509,7 +509,7 @@ elif page == "Model":
     _stepper()
     st.title("Step 2 — Model")
 
-    with st.expander("📐 Dixon-Coles model — how it works"):
+    with st.expander("📐 Dixon-Coles model — how it works", expanded=True):
         st.markdown(r"""
 **Core idea:** Dixon & Coles (1997) bivariate-Poisson model fitted by maximum pseudo-likelihood with exponential time-weighting.
 
@@ -530,12 +530,15 @@ Time-weighting uses **φ(t) = exp(−ξ·t)** where t is days before training an
     if not st.session_state.data_loaded:
         _blocked("Data", "Download data first before training the model.")
 
+    admin = st.session_state.admin_unlocked
     col_train, col_result = st.columns([1, 2])
 
     with col_train:
         st.subheader("Train")
 
-        if st.button("Train Model", type="primary"):
+        if not admin:
+            st.info("Admin login required to train the model.")
+        elif st.button("Train Model", type="primary"):
             with st.spinner("Calculating team strengths…"):
                 try:
                     results = _load_results()
@@ -581,11 +584,37 @@ Time-weighting uses **φ(t) = exp(−ξ·t)** where t is days before training an
                         "α (attack): log-scale, fitted by Dixon-Coles — higher = more goals scored. "
                         "β (defence): log-scale — lower (more negative) = fewer goals conceded."
                     )
+
+                    # Determine current-season teams from results/fixtures
+                    _current_teams: set = set()
+                    try:
+                        if RESULTS_PATH.exists():
+                            _res = pd.read_csv(RESULTS_PATH)
+                            _res = _normalize_teams(_res)
+                            if "SeasonStart" in _res.columns:
+                                _latest = int(_res["SeasonStart"].dropna().max())
+                                _res = _res[_res["SeasonStart"] == _latest]
+                            _current_teams = set(_res["HomeTeam"].tolist() + _res["AwayTeam"].tolist())
+                        if FIXTURES_PATH.exists():
+                            _fix = pd.read_csv(FIXTURES_PATH)
+                            _fix = _normalize_teams(_fix)
+                            _current_teams |= set(_fix["HomeTeam"].tolist() + _fix["AwayTeam"].tolist())
+                    except Exception:
+                        pass
+
+                    team_filter = st.radio(
+                        "Show teams", ["Current season", "All teams"],
+                        horizontal=True, key="model_team_filter"
+                    )
+
                     dc_df = pd.DataFrame({
                         "α (Attack)":  pd.Series(model.attack_rates),
                         "β (Defence)": pd.Series(model.defense_rates),
                     }).sort_values("α (Attack)", ascending=False)
                     dc_df.index.name = "Team"
+
+                    if team_filter == "Current season" and _current_teams:
+                        dc_df = dc_df[dc_df.index.isin(_current_teams)]
 
                     fig = go.Figure()
                     fig.add_bar(x=dc_df.index, y=dc_df["α (Attack)"],  name="Attack (α)",              marker_color="#2196F3")
