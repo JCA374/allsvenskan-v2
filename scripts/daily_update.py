@@ -82,6 +82,12 @@ def step_fetch_data():
         hist_df  = _normalize_teams(pd.read_csv(HISTORICAL_PATH, parse_dates=["Date"]))
         combined = pd.concat([hist_df, cur_results], ignore_index=True)
         combined = combined.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    elif RESULTS_PATH.exists():
+        # No dedicated historical file, but results.csv already contains historical data
+        hist_df  = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
+        combined = pd.concat([hist_df, cur_results], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+        print(f"  Using existing results.csv as historical base ({len(hist_df)} rows)")
     else:
         combined = cur_results
         print("  WARNING: no historical data found — using current season only")
