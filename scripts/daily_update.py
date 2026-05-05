@@ -78,19 +78,35 @@ def step_fetch_data():
     cur_results  = _normalize_teams(cur_results)
     cur_fixtures = _normalize_teams(cur_fixtures)
 
+    # Build combined results: merge all available historical sources with fresh data.
+    # Priority: historical_results.csv > existing results.csv > current season only.
+    # Safety: never let results.csv shrink (protects against source outages).
+    base_df = pd.DataFrame()
     if HISTORICAL_PATH.exists():
-        hist_df  = _normalize_teams(pd.read_csv(HISTORICAL_PATH, parse_dates=["Date"]))
-        combined = pd.concat([hist_df, cur_results], ignore_index=True)
+        base_df = _normalize_teams(pd.read_csv(HISTORICAL_PATH, parse_dates=["Date"]))
+        print(f"  Historical base: {len(base_df)} rows from historical_results.csv")
+    if RESULTS_PATH.exists():
+        existing = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
+        if len(existing) > len(base_df):
+            base_df = existing
+            print(f"  Historical base: {len(base_df)} rows from results.csv (larger)")
+        elif base_df.empty:
+            base_df = existing
+            print(f"  Historical base: {len(base_df)} rows from results.csv")
+
+    if not base_df.empty:
+        combined = pd.concat([base_df, cur_results], ignore_index=True)
         combined = combined.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
-    elif RESULTS_PATH.exists():
-        # No dedicated historical file, but results.csv already contains historical data
-        hist_df  = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
-        combined = pd.concat([hist_df, cur_results], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
-        print(f"  Using existing results.csv as historical base ({len(hist_df)} rows)")
     else:
         combined = cur_results
         print("  WARNING: no historical data found — using current season only")
+
+    # Safety check: never shrink results.csv
+    if RESULTS_PATH.exists():
+        existing_len = len(pd.read_csv(RESULTS_PATH))
+        if len(combined) < existing_len * 0.9:
+            print(f"  ERROR: combined ({len(combined)}) is much smaller than existing ({existing_len}) — aborting save")
+            raise RuntimeError("Refusing to overwrite results.csv with fewer rows (data loss protection)")
 
     for p in (RESULTS_PATH, FIXTURES_PATH, UPCOMING_PATH):
         p.parent.mkdir(parents=True, exist_ok=True)
