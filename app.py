@@ -260,15 +260,21 @@ def _save_forecast_cache():
     rename_map = {col: TEAM_NAME_MAP.get(col, col) for col in sim.columns}
     sim = sim.rename(columns=rename_map).T.groupby(level=0).sum().T
     result = _run_forecast_computation(sim)
+    from datetime import datetime
+    updated_at = datetime.now()
     FORECAST_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(FORECAST_CACHE_PATH, "wb") as f:
-        pickle.dump(result, f)
-    return result
+        pickle.dump((*result, updated_at), f)
+    return (*result, updated_at)
 
 def _load_forecast_cache():
     """Load pre-computed forecast from disk. Raises if not available."""
     with open(FORECAST_CACHE_PATH, "rb") as f:
-        return pickle.load(f)
+        data = pickle.load(f)
+    # Backward compat: old caches have 6 elements, new ones have 7 (with updated_at)
+    if len(data) == 6:
+        return (*data, None)
+    return data
 
 def _standings_from_results(results: pd.DataFrame) -> pd.DataFrame:
     teams = pd.unique(results[["HomeTeam", "AwayTeam"]].values.ravel())
@@ -885,18 +891,22 @@ elif page == "Forecast":
 
     try:
         if FORECAST_CACHE_PATH.exists():
-            table, champ, releg, europe, pos_probs, summary = _load_forecast_cache()
+            table, champ, releg, europe, pos_probs, summary, updated_at = _load_forecast_cache()
         else:
             # First time fallback: compute and save
             sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
             table, champ, releg, europe, pos_probs, summary = _run_forecast_computation(sim)
             try:
-                _save_forecast_cache()
+                result = _save_forecast_cache()
+                updated_at = result[-1]
             except Exception:
-                pass
+                updated_at = None
     except Exception as e:
         st.error(f"Could not load forecast: {e}")
         st.stop()
+
+    if updated_at:
+        st.caption(f"Updated at: {updated_at.strftime('%Y-%m-%d %H:%M')}")
 
     n_teams = len(table)
 
@@ -1069,6 +1079,16 @@ elif page == "Forecast":
 elif page == "Predictions":
     _stepper()
     st.title("Step 5 — Predictions")
+
+    # Show updated-at from forecast cache
+    try:
+        if FORECAST_CACHE_PATH.exists():
+            _fc_data = _load_forecast_cache()
+            _pred_updated_at = _fc_data[-1]
+            if _pred_updated_at:
+                st.caption(f"Updated at: {_pred_updated_at.strftime('%Y-%m-%d %H:%M')}")
+    except Exception:
+        pass
 
     if not st.session_state.model_trained:
         _blocked("Model", "Train the model first to generate fixture predictions.")

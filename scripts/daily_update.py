@@ -8,6 +8,7 @@ Run: python scripts/daily_update.py
 """
 import pickle
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -180,7 +181,8 @@ def step_compute_forecast(sim_results: pd.DataFrame):
     pos_probs = agg.calculate_position_probabilities(sim)
     summary   = agg.analyze_results(sim)
 
-    cache = (table, champ, releg, europe, pos_probs, summary)
+    updated_at = datetime.now()
+    cache = (table, champ, releg, europe, pos_probs, summary, updated_at)
     FORECAST_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(FORECAST_CACHE_PATH, "wb") as f:
         pickle.dump(cache, f)
