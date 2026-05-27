@@ -823,7 +823,7 @@ This is critical — without it, early-season leaders would get no advantage.
         if st.session_state.sim_complete:
             try:
                 if FORECAST_CACHE_PATH.exists():
-                    _, _, _, _, _, summary = _load_forecast_cache()
+                    _, _, _, _, _, summary, _ = _load_forecast_cache()
                 else:
                     sim = _load_sim(SIM_PATH.stat().st_mtime if SIM_PATH.exists() else 0)
                     _, _, _, _, _, summary = _run_forecast_computation(sim)
