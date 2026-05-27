@@ -99,7 +99,6 @@ for key, default in {
     "model_trained":  False,
     "sim_complete":   False,
     "active_page":    "Forecast",
-    "admin_unlocked": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -123,20 +122,12 @@ if not st.session_state.sim_complete and SIM_PATH.exists():
         pass
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
-PUBLIC_PAGES  = {"Forecast", "Predictions", "Model"}
-ADMIN_PAGES   = {"Data", "Simulate", "Update"}
-
 with st.sidebar:
     st.title("⚽ Allsvenskan")
     st.caption("Monte Carlo Forecast")
     st.divider()
 
-    admin = st.session_state.admin_unlocked
-    visible_steps = STEPS if admin else [s for s in STEPS if s[0] in PUBLIC_PAGES]
-
     for i, (name, icon, gate) in enumerate(STEPS, 1):
-        if name not in PUBLIC_PAGES and not admin:
-            continue
         done   = _step_done(gate)
         active = st.session_state.active_page == name
         if active:
@@ -154,45 +145,18 @@ with st.sidebar:
             args=(name,),
         )
 
-    if admin:
-        st.divider()
-        _upd_active = st.session_state.active_page == "Update"
-        st.button(
-            "**🔄 Update Everything**" if _upd_active else "🔄 Update Everything",
-            key="nav_Update",
-            use_container_width=True,
-            type="primary" if _upd_active else "secondary",
-            on_click=_nav,
-            args=("Update",),
-        )
-
-    # ── Admin login / logout ───────────────────────────────────────────────
     st.divider()
-    if not admin:
-        with st.expander("🔒 Admin login"):
-            pwd = st.text_input("Password", type="password", key="admin_pwd_input", label_visibility="collapsed")
-            if st.button("Unlock", key="admin_login_btn", use_container_width=True):
-                expected = st.secrets.get("ADMIN_PASSWORD", "")
-                if expected and pwd == expected:
-                    st.session_state.admin_unlocked = True
-                    st.rerun()
-                else:
-                    st.error("Wrong password")
-    else:
-        st.caption("🔓 Admin mode")
-        if st.button("Lock", key="admin_lock_btn", use_container_width=True):
-            st.session_state.admin_unlocked = False
-            if st.session_state.active_page in ADMIN_PAGES:
-                st.session_state.active_page = "Forecast"
-            st.rerun()
+    _upd_active = st.session_state.active_page == "Update"
+    st.button(
+        "**🔄 Update Everything**" if _upd_active else "🔄 Update Everything",
+        key="nav_Update",
+        use_container_width=True,
+        type="primary" if _upd_active else "secondary",
+        on_click=_nav,
+        args=("Update",),
+    )
 
 page = st.session_state.active_page
-
-# Redirect non-admin users away from admin pages
-if page in ADMIN_PAGES and not st.session_state.admin_unlocked:
-    st.session_state.active_page = "Forecast"
-    page = "Forecast"
-    st.rerun()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -536,15 +500,12 @@ Time-weighting uses **φ(t) = exp(−ξ·t)** where t is days before training an
     if not st.session_state.data_loaded:
         _blocked("Data", "Download data first before training the model.")
 
-    admin = st.session_state.admin_unlocked
     col_train, col_result = st.columns([1, 2])
 
     with col_train:
         st.subheader("Train")
 
-        if not admin:
-            st.info("Admin login required to train the model.")
-        elif st.button("Train Model", type="primary"):
+        if st.button("Train Model", type="primary"):
             with st.spinner("Calculating team strengths…"):
                 try:
                     results = _load_results()
