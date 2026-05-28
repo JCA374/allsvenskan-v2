@@ -36,13 +36,30 @@ class DataCleaner:
                     from .scraper import AllsvenskanScraper
                     scraper = AllsvenskanScraper()
                     upcoming_fixtures = scraper.get_upcoming_fixtures()
-                    
+
                     if not upcoming_fixtures.empty:
                         fixtures = upcoming_fixtures[['Date', 'HomeTeam', 'AwayTeam']].copy()
+                        # Remove any fixtures that already appear in results
+                        # (ESPN may include games that football-data.co.uk
+                        #  already has as completed results)
+                        if not results.empty:
+                            played = set(
+                                zip(results["HomeTeam"], results["AwayTeam"])
+                            )
+                            before = len(fixtures)
+                            fixtures = fixtures[
+                                ~fixtures.apply(
+                                    lambda r: (r["HomeTeam"], r["AwayTeam"]) in played,
+                                    axis=1,
+                                )
+                            ].copy()
+                            dropped = before - len(fixtures)
+                            if dropped:
+                                print(f"Dropped {dropped} fixtures already in results")
                         print(f"Added {len(fixtures)} upcoming fixtures from enhanced scraper")
                     else:
                         print("No upcoming fixtures available from any source")
-                        
+
                 except Exception as e:
                     print(f"Could not get upcoming fixtures: {e}")
             

@@ -13,7 +13,9 @@ import pandas as pd
 from datetime import datetime
 import json
 
-# Import custom modules
+from core.config import (
+    RESULTS_PATH, FIXTURES_PATH, TEAM_STATS_PATH, MODEL_PATH,
+)
 from core.data.scraper import AllsvenskanScraper
 from core.data.cleaner import DataCleaner
 from core.data.strength import TeamStrengthCalculator
@@ -77,12 +79,12 @@ def clean_data(input_file=None):
     cleaner = DataCleaner()
     results, fixtures = cleaner.clean_data(raw_data)
 
-    results.to_csv('data/clean/results.csv', index=False)
-    fixtures.to_csv('data/clean/fixtures.csv', index=False)
+    results.to_csv(RESULTS_PATH, index=False)
+    fixtures.to_csv(FIXTURES_PATH, index=False)
 
     print(f"✅ Cleaned {len(results)} completed matches")
     print(f"✅ Found {len(fixtures)} upcoming fixtures")
-    print(f"📁 Saved to: data/clean/results.csv and data/clean/fixtures.csv")
+    print(f"📁 Saved to: {RESULTS_PATH} and {FIXTURES_PATH}")
 
     return results, fixtures
 
@@ -92,18 +94,17 @@ def train_model(advanced=False):
     print("🎯 Training Poisson model...")
 
     # Load results
-    results_file = 'data/clean/results.csv'
-    if not Path(results_file).exists():
+    if not RESULTS_PATH.exists():
         print("❌ Results file not found. Run 'clean' first.")
         return None
 
-    results = pd.read_csv(results_file)
+    results = pd.read_csv(RESULTS_PATH)
 
     # Calculate team strengths
     print("📊 Calculating team strengths...")
     strength_calc = TeamStrengthCalculator()
     team_stats = strength_calc.calculate_strengths(results)
-    team_stats.to_csv('data/processed/team_stats.csv')
+    team_stats.to_csv(TEAM_STATS_PATH)
     print(f"✅ Team statistics calculated for {len(team_stats)} teams")
 
     # Train model
@@ -113,11 +114,10 @@ def train_model(advanced=False):
     model.fit(results, team_stats)
 
     # Save model
-    model_file = 'models/poisson_params.pkl'
-    model.save(model_file)
+    model.save(str(MODEL_PATH))
 
     print(f"✅ Model trained successfully")
-    print(f"📁 Saved to: {model_file}")
+    print(f"📁 Saved to: {MODEL_PATH}")
 
     return model, team_stats
 
@@ -127,21 +127,19 @@ def run_simulation(n_simulations=10000):
     print(f"🎲 Running Monte Carlo simulation ({n_simulations:,} iterations)...")
 
     # Load model
-    model_file = 'models/poisson_params.pkl'
-    if not Path(model_file).exists():
+    if not MODEL_PATH.exists():
         print("❌ Model file not found. Run 'train' first.")
         return None
 
     model = PoissonModel()
-    model.load(model_file)
+    model.load(str(MODEL_PATH))
 
     # Load fixtures
-    fixtures_file = 'data/clean/fixtures.csv'
-    if not Path(fixtures_file).exists():
+    if not FIXTURES_PATH.exists():
         print("❌ Fixtures file not found. Run 'clean' first.")
         return None
 
-    fixtures = pd.read_csv(fixtures_file)
+    fixtures = pd.read_csv(FIXTURES_PATH)
 
     # Run simulation
     simulator = MonteCarloSimulator(fixtures, model)
@@ -236,21 +234,19 @@ def predict_fixtures():
     print("🔮 Generating fixture predictions...")
 
     # Load model
-    model_file = 'models/poisson_params.pkl'
-    if not Path(model_file).exists():
+    if not MODEL_PATH.exists():
         print("❌ Model file not found. Run 'train' first.")
         return None
 
     model = PoissonModel()
-    model.load(model_file)
+    model.load(str(MODEL_PATH))
 
     # Load fixtures
-    fixtures_file = 'data/clean/fixtures.csv'
-    if not Path(fixtures_file).exists():
+    if not FIXTURES_PATH.exists():
         print("❌ Fixtures file not found. Run 'clean' first.")
         return None
 
-    fixtures = pd.read_csv(fixtures_file)
+    fixtures = pd.read_csv(FIXTURES_PATH)
 
     # Generate predictions
     predictions = []

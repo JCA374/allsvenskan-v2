@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run tests
+        run: python -m pytest tests/ -m "not network" --tb=short -q
+
       - name: Run pipeline
         run: python scripts/daily_update.py
 

@@ -196,8 +196,13 @@ class AllsvenskanScraper:
             self.logger.warning("ESPN API returned no upcoming fixtures")
             return pd.DataFrame()
 
-        self.logger.info("Fetched %d upcoming fixtures from ESPN API", len(rows))
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+        before = len(df)
+        df = df.drop_duplicates(subset=["HomeTeam", "AwayTeam"], keep="first")
+        if len(df) < before:
+            self.logger.info("Dropped %d duplicate ESPN fixtures", before - len(df))
+        self.logger.info("Fetched %d upcoming fixtures from ESPN API", len(df))
+        return df
 
     # ------------------------------------------------------------------ #
     # Private helpers

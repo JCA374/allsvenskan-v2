@@ -17,53 +17,18 @@ import pandas as pd
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+from core.config import (
+    HISTORICAL_PATH, RESULTS_PATH, FIXTURES_PATH, UPCOMING_PATH,
+    TEAM_STATS_PATH, MODEL_PATH, SIM_PATH, FORECAST_CACHE_PATH,
+    GAMES_PER_TEAM, RELEGATION_SPOTS, EUROPEAN_SPOTS,
+)
 from core.data.scraper import AllsvenskanScraper
 from core.data.cleaner import DataCleaner
 from core.data.strength import TeamStrengthCalculator
 from core.models.poisson_model import PoissonModel
 from core.simulation.simulator import MonteCarloSimulator
 from core.analysis.aggregator import ResultsAggregator
-from core.utils.helpers import TEAM_NAME_MAP
-
-# ── Paths (must match app.py constants) ───────────────────────────────────────
-HISTORICAL_PATH     = ROOT / "data/clean/historical_results.csv"
-RESULTS_PATH        = ROOT / "data/clean/results.csv"
-FIXTURES_PATH       = ROOT / "data/clean/fixtures.csv"
-UPCOMING_PATH       = ROOT / "data/clean/upcoming_fixtures.csv"
-TEAM_STATS_PATH     = ROOT / "data/processed/team_stats.csv"
-MODEL_PATH          = ROOT / "models/poisson_params.pkl"
-SIM_PATH            = ROOT / "reports/simulations/sim_results_latest.csv"
-FORECAST_CACHE_PATH = ROOT / "reports/simulations/forecast_cache.pkl"
-
-RELEGATION_SPOTS = 3
-EUROPEAN_SPOTS   = 3
-
-def _normalize_teams(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    for col in ("HomeTeam", "AwayTeam"):
-        if col in df.columns:
-            df[col] = df[col].map(lambda t: TEAM_NAME_MAP.get(str(t).strip(), str(t).strip()))
-    return df
-
-def _standings_from_results(results: pd.DataFrame) -> pd.DataFrame:
-    teams = pd.unique(results[["HomeTeam", "AwayTeam"]].values.ravel())
-    cols  = ["GP", "W", "D", "L", "GF", "GA", "GD", "Pts"]
-    tbl   = pd.DataFrame(0, index=teams, columns=cols)
-    for _, r in results.iterrows():
-        h, a   = r["HomeTeam"], r["AwayTeam"]
-        hg, ag = int(r["FTHG"]), int(r["FTAG"])
-        tbl.at[h, "GP"] += 1; tbl.at[a, "GP"] += 1
-        tbl.at[h, "GF"] += hg; tbl.at[h, "GA"] += ag
-        tbl.at[a, "GF"] += ag; tbl.at[a, "GA"] += hg
-        if hg > ag:
-            tbl.at[h, "W"] += 1; tbl.at[a, "L"] += 1; tbl.at[h, "Pts"] += 3
-        elif ag > hg:
-            tbl.at[a, "W"] += 1; tbl.at[h, "L"] += 1; tbl.at[a, "Pts"] += 3
-        else:
-            tbl.at[h, "D"] += 1; tbl.at[a, "D"] += 1
-            tbl.at[h, "Pts"] += 1; tbl.at[a, "Pts"] += 1
-    tbl["GD"] = tbl["GF"] - tbl["GA"]
-    return tbl.sort_values(["Pts", "GD", "GF"], ascending=False).reset_index().rename(columns={"index": "Team"})
+from core.utils.helpers import TEAM_NAME_MAP, validate_games_per_team, normalize_team_names, build_standings
 
 
 def step_fetch_data():
@@ -76,18 +41,18 @@ def step_fetch_data():
 
     cleaner = DataCleaner()
     cur_results, cur_fixtures = cleaner.clean_data(raw)
-    cur_results  = _normalize_teams(cur_results)
-    cur_fixtures = _normalize_teams(cur_fixtures)
+    cur_results  = normalize_team_names(cur_results)
+    cur_fixtures = normalize_team_names(cur_fixtures)
 
     # Build combined results: merge all available historical sources with fresh data.
     # Priority: historical_results.csv > existing results.csv > current season only.
     # Safety: never let results.csv shrink (protects against source outages).
     base_df = pd.DataFrame()
     if HISTORICAL_PATH.exists():
-        base_df = _normalize_teams(pd.read_csv(HISTORICAL_PATH, parse_dates=["Date"]))
+        base_df = normalize_team_names(pd.read_csv(HISTORICAL_PATH, parse_dates=["Date"]))
         print(f"  Historical base: {len(base_df)} rows from historical_results.csv")
     if RESULTS_PATH.exists():
-        existing = _normalize_teams(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
+        existing = normalize_team_names(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
         if len(existing) > len(base_df):
             base_df = existing
             print(f"  Historical base: {len(base_df)} rows from results.csv (larger)")
@@ -111,6 +76,15 @@ def step_fetch_data():
 
     for p in (RESULTS_PATH, FIXTURES_PATH, UPCOMING_PATH):
         p.parent.mkdir(parents=True, exist_ok=True)
+
+    # Sanity check: every team must have exactly 30 GP (results + fixtures)
+    bad = validate_games_per_team(cur_results, cur_fixtures, GAMES_PER_TEAM)
+    if bad:
+        for team, played, upcoming, total in bad:
+            print(f"  WARNING: {team}: {played} played + {upcoming} upcoming = {total} (expected {GAMES_PER_TEAM})")
+        raise RuntimeError(
+            f"GP sanity check failed — {len(bad)} team(s) do not have {GAMES_PER_TEAM} games"
+        )
 
     combined.to_csv(RESULTS_PATH, index=False)
     cur_fixtures.to_csv(FIXTURES_PATH, index=False)
@@ -144,7 +118,7 @@ def step_simulate(model: PoissonModel, results: pd.DataFrame):
         if "SeasonStart" in results.columns and not results.empty:
             latest   = int(results["SeasonStart"].dropna().max())
             cur      = results[results["SeasonStart"] == latest]
-            standings = _standings_from_results(cur)
+            standings = build_standings(cur)
             current_pts = dict(zip(standings["Team"], standings["Pts"]))
     except Exception as e:
         print(f"  WARNING: could not build standings seed: {e}")

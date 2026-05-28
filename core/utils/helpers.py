@@ -78,6 +78,36 @@ TEAM_NAME_MAP: dict = {
     # AIK (already canonical)
 }
 
+from core.config import GAMES_PER_TEAM  # re-export for backward compat
+
+
+def validate_games_per_team(results_df, fixtures_df, expected=GAMES_PER_TEAM):
+    """Check that every team has exactly `expected` total games (results + fixtures).
+
+    Returns a list of (team, played, upcoming, total) tuples for teams that
+    don't match.  An empty list means everything is correct.
+    """
+    teams = set()
+    for df in (results_df, fixtures_df):
+        if df is not None and not df.empty:
+            teams |= set(df["HomeTeam"].unique()) | set(df["AwayTeam"].unique())
+
+    bad = []
+    for team in sorted(teams):
+        played = 0
+        upcoming = 0
+        if results_df is not None and not results_df.empty:
+            played = int((results_df["HomeTeam"] == team).sum()
+                         + (results_df["AwayTeam"] == team).sum())
+        if fixtures_df is not None and not fixtures_df.empty:
+            upcoming = int((fixtures_df["HomeTeam"] == team).sum()
+                           + (fixtures_df["AwayTeam"] == team).sum())
+        total = played + upcoming
+        if total != expected:
+            bad.append((team, played, upcoming, total))
+    return bad
+
+
 def ensure_directory_exists(directory_path):
     """Ensure a directory exists, create if it doesn't"""
     try:
@@ -127,6 +157,46 @@ def normalize_team_name(team_name):
     if pd.isna(team_name):
         return team_name
     return TEAM_NAME_MAP.get(str(team_name).strip(), str(team_name).strip())
+
+
+def normalize_team_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply TEAM_NAME_MAP to HomeTeam/AwayTeam columns of a DataFrame."""
+    df = df.copy()
+    for col in ("HomeTeam", "AwayTeam"):
+        if col in df.columns:
+            df[col] = df[col].map(lambda t: TEAM_NAME_MAP.get(str(t).strip(), str(t).strip()))
+    return df
+
+
+def build_standings(results: pd.DataFrame) -> pd.DataFrame:
+    """Build a league table from completed match results.
+
+    Returns DataFrame with columns: Team, GP, W, D, L, GF, GA, GD, Pts
+    sorted by Pts > GD > GF descending.
+    """
+    teams = pd.unique(results[["HomeTeam", "AwayTeam"]].values.ravel())
+    cols = ["GP", "W", "D", "L", "GF", "GA", "GD", "Pts"]
+    tbl = pd.DataFrame(0, index=teams, columns=cols)
+    for _, r in results.iterrows():
+        h, a = r["HomeTeam"], r["AwayTeam"]
+        hg, ag = int(r["FTHG"]), int(r["FTAG"])
+        tbl.at[h, "GP"] += 1; tbl.at[a, "GP"] += 1
+        tbl.at[h, "GF"] += hg; tbl.at[h, "GA"] += ag
+        tbl.at[a, "GF"] += ag; tbl.at[a, "GA"] += hg
+        if hg > ag:
+            tbl.at[h, "W"] += 1; tbl.at[a, "L"] += 1; tbl.at[h, "Pts"] += 3
+        elif ag > hg:
+            tbl.at[a, "W"] += 1; tbl.at[h, "L"] += 1; tbl.at[a, "Pts"] += 3
+        else:
+            tbl.at[h, "D"] += 1; tbl.at[a, "D"] += 1
+            tbl.at[h, "Pts"] += 1; tbl.at[a, "Pts"] += 1
+    tbl["GD"] = tbl["GF"] - tbl["GA"]
+    return (
+        tbl.sort_values(["Pts", "GD", "GF"], ascending=False)
+           .reset_index()
+           .rename(columns={"index": "Team"})
+    )
+
 
 def calculate_points_from_result(home_goals, away_goals):
     """Calculate points awarded for a match result"""

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Allsvenskan (Swedish top-flight football) Monte Carlo simulation and forecasting application. Predicts football match outcomes and season standings using Poisson-based statistical models, with optional live betting odds integration via a hybrid model. Has both a Streamlit web UI (`app.py`) and a CLI (`cli.py`).
+Allsvenskan (Swedish top-flight football) Monte Carlo simulation and forecasting application. Predicts football match outcomes and season standings using Poisson-based statistical models. Has both a Streamlit web UI (`app.py`) and a CLI (`cli.py`).
 
 ## Development Commands
 
@@ -42,12 +42,12 @@ export ODDS_API_KEY="..."  # required for odds integration
 ### Data Pipeline (Python API)
 
 ```python
-from allsvenskan.data.scraper import AllsvenskanScraper
-from allsvenskan.data.cleaner import DataCleaner
-from allsvenskan.data.strength import TeamStrengthCalculator
-from allsvenskan.models.poisson_model import PoissonModel
-from allsvenskan.simulation.simulator import MonteCarloSimulator
-from allsvenskan.analysis.aggregator import ResultsAggregator
+from core.data.scraper import AllsvenskanScraper
+from core.data.cleaner import DataCleaner
+from core.data.strength import TeamStrengthCalculator
+from core.models.poisson_model import PoissonModel
+from core.simulation.simulator import MonteCarloSimulator
+from core.analysis.aggregator import ResultsAggregator
 
 scraper = AllsvenskanScraper()
 raw_data = scraper.scrape_matches(seasons=[2023, 2024])
@@ -78,7 +78,6 @@ Allsvenskan runs within a single calendar year (approx. April–November). Seaso
 4. **Model** (`models/poisson_model.py`): Poisson regression; `use_mle=True, use_dixon_coles=True` for advanced training
 5. **Simulation** (`simulation/simulator.py`): `MonteCarloSimulator(fixtures_df, model).run(n_simulations=10000)`. Use `MonteCarloSimulator.from_upcoming_fixtures(model)` to load from `data/clean/upcoming_fixtures.csv` directly
 6. **Analysis** (`analysis/aggregator.py`): `ResultsAggregator` — methods `analyze_results()`, `calculate_championship_odds()`, `calculate_relegation_odds()`, `calculate_expected_points()`
-7. **Hybrid** (`models/hybrid_model.py`): Weights Poisson vs. odds dynamically based on season progress (early→70% odds, late→90% Poisson)
 
 ### Column Name Standardization
 
@@ -88,9 +87,17 @@ Allsvenskan runs within a single calendar year (approx. April–November). Seaso
 
 Always run this on loaded DataFrames before processing.
 
+### Streamlit UI Structure
+
+`app.py` is the entry point (config, sidebar, routing). Each page lives in its own module under `core/ui/pages/` (data, model, simulate, forecast, predictions, update). Shared UI helpers (loaders, navigation, stepper) are in `core/ui/helpers.py`.
+
 ### Streamlit Session State Keys
 
-`data_loaded`, `model_trained`, `simulation_complete`, `db_manager`, `db_connected`, `poisson_model`, `odds_data`, `odds_fetched`, `active_page`
+`data_loaded`, `model_trained`, `sim_complete`, `active_page`
+
+### Centralized Config
+
+`core/config.py` holds all file paths and league constants (`GAMES_PER_TEAM`, `RELEGATION_SPOTS`, `EUROPEAN_SPOTS`). All entry points import from there.
 
 ## File Paths
 
@@ -110,4 +117,4 @@ Always run this on loaded DataFrames before processing.
 - Simulation default is 10,000 iterations; use fewer for dev/testing
 - Team names from the football-data.co.uk source and odds API may differ — no automatic mapping exists yet
 - Database supports both SQLite (default) and PostgreSQL; schema tables: `matches`, `team_statistics`, `model_parameters`, `simulation_results`, `analysis_results`
-- The `premier_league/` directory is a leftover from before the migration and should be deleted once confirmed unnecessary
+- The `premier_league/` directory (if present) is a leftover from before the migration and can be deleted
