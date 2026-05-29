@@ -3,14 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core.config import RESULTS_PATH, MODEL_PATH, SIM_PATH
-try:
-    from core.ui.helpers import STEPS, nav, step_done
-except Exception as e:
-    import traceback
-    st.set_page_config(page_title="Import Error")
-    st.error(f"**Import failed:** `{type(e).__name__}: {e}`")
-    st.code(traceback.format_exc())
-    st.stop()
+from core.ui.helpers import STEPS, nav, step_done
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(

@@ -158,3 +158,45 @@ class TestBuildStandings:
             assert row["W"] == 3   # all home wins
             assert row["L"] == 3   # all away losses
             assert row["Pts"] == 9
+
+
+# ── Import smoke tests ─────────────────────────────────────────────────────
+
+class TestEntryPointImports:
+    """Verify that all entry points can import their dependencies.
+
+    These catch missing packages in requirements.txt or broken import
+    chains before they reach CI or Streamlit Cloud.
+    """
+
+    def test_daily_update_imports(self):
+        """scripts/daily_update.py imports should resolve."""
+        from core.config import (
+            HISTORICAL_PATH, RESULTS_PATH, FIXTURES_PATH, UPCOMING_PATH,
+            TEAM_STATS_PATH, MODEL_PATH, SIM_PATH, FORECAST_CACHE_PATH,
+            GAMES_PER_TEAM, RELEGATION_SPOTS, EUROPEAN_SPOTS,
+        )
+        from core.data.scraper import AllsvenskanScraper
+        from core.data.cleaner import DataCleaner
+        from core.data.strength import TeamStrengthCalculator
+        from core.models.poisson_model import PoissonModel
+        from core.simulation.simulator import MonteCarloSimulator
+        from core.analysis.aggregator import ResultsAggregator
+        from core.utils.helpers import (
+            TEAM_NAME_MAP, validate_games_per_team,
+            normalize_team_names, build_standings,
+        )
+
+    def test_app_imports(self):
+        """app.py imports should resolve."""
+        pytest.importorskip("streamlit")
+        from core.config import RESULTS_PATH, MODEL_PATH, SIM_PATH
+        from core.ui.helpers import STEPS, nav, step_done
+
+    def test_cli_imports(self):
+        """cli.py imports should resolve."""
+        from core.config import (
+            RESULTS_PATH, FIXTURES_PATH, TEAM_STATS_PATH, MODEL_PATH,
+        )
+        from core.data.scraper import AllsvenskanScraper
+        from core.data.cleaner import DataCleaner
