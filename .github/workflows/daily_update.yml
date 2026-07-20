@@ -1,8 +1,9 @@
 name: Daily forecast update
 
 on:
-  schedule:
-    - cron: "0 */11 * * *"  # every 11 hours
+  # Automatic schedule disabled — run manually from the GitHub UI instead.
+  # schedule:
+  #   - cron: "0 */11 * * *"  # every 11 hours
   workflow_dispatch:         # allow manual trigger from GitHub UI
 
 permissions:
