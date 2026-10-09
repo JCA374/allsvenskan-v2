@@ -4,121 +4,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Allsvenskan (Swedish top-flight football) Monte Carlo simulation and forecasting application. Predicts football match outcomes and season standings using Poisson-based statistical models. Has both a Streamlit web UI (`app.py`) and a CLI (`cli.py`).
+Allsvenskan (Swedish top-flight football) season forecast. A static site on GitHub Pages
+(https://jca374.github.io/allsvenskan-v2/) where **the visitor's browser** fits a Dixon-Coles model and
+runs the Monte Carlo season simulation. Python only fetches and exports the match data.
 
-## Development Commands
+## Layout
 
-### Running the Application
+| Path | Purpose |
+|------|---------|
+| `site/index.html`, `site/style.css` | The page (plain HTML/CSS, no build step) |
+| `site/app.js` | UI: table, tiles, heatmap, what-if picks, score grids; talks to the workers |
+| `site/model.js` | Dixon-Coles fit, score grids, season simulation, round replay, backtest (JS port of `core/models/poisson_model.py`) |
+| `site/worker.js` | Web Worker wrapper around `model.js`; the page runs two (interactive forecast + background replay/backtest) |
+| `site/charts.js` | Hand-written SVG charts (line + crosshair, scatter, calibration) and the shared tooltip |
+| `site/data.json` | Results + remaining fixtures, written by the export script |
+| `scripts/export_site_data.py` | `--fetch` refreshes `data/clean/*.csv` via `core/data/pipeline.py`, then writes `site/data.json` |
+| `core/data/` | `scraper.py` (football-data.co.uk + ESPN fixtures), `cleaner.py`, `pipeline.py` (`fetch_and_save`) |
+| `core/utils/helpers.py` | `TEAM_NAME_MAP`, `normalize_team_names`, `validate_games_per_team`, `drop_playoff_matches` |
+| `core/models/poisson_model.py` | Python reference model; the JS port is tested against it |
+| `.github/workflows/pages.yml` | Daily 05:00 UTC + on push: tests → fetch data → deploy `site/` to Pages |
 
-```bash
-# Streamlit UI
-streamlit run app.py --server.port 5000
-
-# CLI (full pipeline or individual steps)
-python cli.py pipeline
-python cli.py scrape
-python cli.py clean
-python cli.py train --advanced
-python cli.py simulate --iterations 50000
-python cli.py analyze
-python cli.py predict
-```
-
-### Testing
-
-```bash
-python -m pytest tests/
-python -m pytest tests/test_odds_integration.py
-python -m pytest -v tests/
-```
-
-### Environment Variables
+## Commands
 
 ```bash
-export DATABASE_URL="postgresql://user:password@host:port/dbname"  # default: SQLite at data/db/allsvenskan.db
-export ODDS_API_KEY="..."  # required for odds integration
+python scripts/export_site_data.py --fetch      # refresh data and site/data.json
+python -m http.server -d site 8000               # preview at http://localhost:8000
+python -m pytest tests/ -m "not network"         # Python tests (drop -m for live-data tests)
+node --test "tests/js/*.test.mjs"                # JS model tests
+python tests/js/make_parity_fixture.py           # regenerate the Python-vs-JS parity fixture
 ```
 
-### Data Pipeline (Python API)
+## Data
 
-```python
-from core.data.scraper import AllsvenskanScraper
-from core.data.cleaner import DataCleaner
-from core.data.strength import TeamStrengthCalculator
-from core.models.poisson_model import PoissonModel
-from core.simulation.simulator import MonteCarloSimulator
-from core.analysis.aggregator import ResultsAggregator
+- Source: `https://www.football-data.co.uk/new/SWE.csv` (results; no CORS, so the browser cannot fetch it directly). Upcoming fixtures come from the ESPN scoreboard API, queried **one day at a time** (date-range queries return nothing).
+- Canonical team names are football-data's ASCII names (`Malmo FF`, `Goteborg`); `TEAM_NAME_MAP` maps aliases. Display names with å/ä/ö live in `DISPLAY_NAMES` in `site/app.js`.
+- The source lists relegation-playoff legs as league games; `drop_playoff_matches` removes them at export.
+- `fetch_and_save` refuses to write if results would shrink or any team does not total 30 games (16 teams, double round-robin).
 
-scraper = AllsvenskanScraper()
-raw_data = scraper.scrape_matches(seasons=[2023, 2024])
+## Model notes
 
-cleaner = DataCleaner()
-results, fixtures = cleaner.clean_data(raw_data)
-```
-
-## Architecture
-
-The Python package is `core/` (previously `allsvenskan/`, before that `premier_league/`).
-
-### Data Source
-
-Data comes from **football-data.co.uk** (free, no API key required):
-- Primary: `https://www.football-data.co.uk/new/SWE.csv` — aggregated new-format file covering all seasons. Rows with empty HG/AG are upcoming fixtures.
-- Fallback: individual season files `https://www.football-data.co.uk/mmz4281/{code}/S1.csv` where code maps from `AllsvenskanScraper.HISTORICAL_SEASONS`.
-
-Column mapping from source: `HG` → `FTHG`, `AG` → `FTAG`. Dates are `dd/mm/yy` format (parsed with `dayfirst=True`). Only rows where `Div == "S1"` (Allsvenskan) are kept.
-
-Allsvenskan runs within a single calendar year (approx. April–November). Season years in the data are e.g. `2024`, not split-year.
-
-### Data Flow
-
-1. **Scraping** (`data/scraper.py`): `AllsvenskanScraper.scrape_matches(seasons=[2024])` → returns DataFrame with Date, HomeTeam, AwayTeam, FTHG, FTAG, Season, SeasonStart
-2. **Cleaning** (`data/cleaner.py`): Splits into completed results (FTHG/FTAG filled) and upcoming fixtures (NaN)
-3. **Strength** (`data/strength.py`): Computes attack/defense ratings per team
-4. **Model** (`models/poisson_model.py`): Poisson regression; `use_mle=True, use_dixon_coles=True` for advanced training
-5. **Simulation** (`simulation/simulator.py`): `MonteCarloSimulator(fixtures_df, model).run(n_simulations=10000)`. Use `MonteCarloSimulator.from_upcoming_fixtures(model)` to load from `data/clean/upcoming_fixtures.csv` directly
-6. **Analysis** (`analysis/aggregator.py`): `ResultsAggregator` — methods `analyze_results()`, `calculate_championship_odds()`, `calculate_relegation_odds()`, `calculate_expected_points()`
-
-### Column Name Standardization
-
-`ColumnStandardizer.standardize_columns(df)` normalizes inconsistent column names across datasets:
-- `Home_Team`/`home_team` → `HomeTeam`
-- `FTHG`/`home_goals` → `FTHG`
-
-Always run this on loaded DataFrames before processing.
-
-### Static site (GitHub Pages)
-
-`site/` is a plain HTML/JS page (no build step) published to GitHub Pages by `.github/workflows/pages.yml` (daily + on push to `main`). The visitor's browser fits the Dixon-Coles model and runs the simulation (`site/model.js`, a JS port of `core/models/poisson_model.py` — keep the two in sync). The only server-side step is `python scripts/export_site_data.py [--fetch]`, which writes `site/data.json` (results + remaining fixtures). Preview locally with `python -m http.server -d site 8000`.
-
-### Streamlit UI Structure
-
-`app.py` is the entry point (config, sidebar, routing). Each page lives in its own module under `core/ui/pages/` (data, model, simulate, forecast, predictions, update). Shared UI helpers (loaders, navigation, stepper) are in `core/ui/helpers.py`.
-
-### Streamlit Session State Keys
-
-`data_loaded`, `model_trained`, `sim_complete`, `active_page`
-
-### Centralized Config
-
-`core/config.py` holds all file paths and league constants (`GAMES_PER_TEAM`, `RELEGATION_SPOTS`, `EUROPEAN_SPOTS`). All entry points import from there.
-
-## File Paths
-
-| Path | Contents |
-|------|----------|
-| `data/clean/results.csv` | Completed matches |
-| `data/clean/fixtures.csv` | Upcoming matches (from cleaner) |
-| `data/clean/upcoming_fixtures.csv` | Authentic fixture schedule (preferred for simulation) |
-| `data/processed/team_stats.csv` | Team strength metrics |
-| `models/poisson_params.pkl` | Pickled `PoissonModel` |
-| `reports/simulations/sim_results_*.csv` | Monte Carlo output |
-| `reports/simulations/fixture_predictions.csv` | Per-match predictions |
-
-## Key Notes
-
-- Odds API (`api.the-odds-api.com`) has request limits on the free tier — only fetch when explicitly requested
-- Simulation default is 10,000 iterations; use fewer for dev/testing
-- Team names from the football-data.co.uk source and odds API may differ — no automatic mapping exists yet
-- Database supports both SQLite (default) and PostgreSQL; schema tables: `matches`, `team_statistics`, `model_parameters`, `simulation_results`, `analysis_results`
-- The `premier_league/` directory (if present) is a leftover from before the migration and can be deleted
+- λ = exp(α_home + β_away + γ), μ = exp(α_away + β_home), time decay ξ = 0.0018/day, low-score correction ρ. ξ was checked by backtest (0.001 / 0.0018 / 0.003; 0.0018 best).
+- Teams with little recent history (weighted matches < 5, e.g. newly promoted) are blended toward the average of the 3 weakest teams of the latest season. The Python model does not do this, so parity is only tested on teams with full history.
+- If you change the model maths, change both `site/model.js` and `core/models/poisson_model.py`, then regenerate the parity fixture.

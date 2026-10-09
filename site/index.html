@@ -22,20 +22,29 @@
           </select>
         </label>
         <button id="run" type="button">Run again</button>
+        <span id="fixed-chip" class="chip" hidden><span id="fixed-count"></span> · <button type="button" id="reset" class="link">Reset</button></span>
         <span id="status" class="status" aria-live="polite"></span>
       </div>
     </header>
 
+    <section class="tiles" id="tiles" aria-live="polite"></section>
+
     <section>
       <h2>Predicted final table</h2>
-      <p class="note">Sorted by expected points. P, Pts and GD are the current table.</p>
+      <p class="note">
+        Sorted by expected points. P, Pts and GD are the current table.
+        <span class="key"><i class="kdot"></i>points now</span>
+        <span class="key"><i class="kbar"></i>likely final points (80% range)</span>
+        <span class="key"><i class="ktick"></i>expected</span>
+      </p>
       <div class="scroll">
         <table id="table">
           <thead>
             <tr>
               <th class="num">#</th><th>Team</th>
-              <th class="num">P</th><th class="num">Pts</th><th class="num">GD</th>
-              <th class="num">Exp. pts</th>
+              <th class="num opt">P</th><th class="num">Pts</th><th class="num opt">GD</th>
+              <th class="range-head">Final points<div class="range-scale" id="range-scale"></div></th>
+              <th class="num">Exp.</th>
               <th class="num">Champion</th><th class="num">Top 3</th>
               <th class="num">14th<br><span class="th-note">playoff</span></th>
               <th class="num">15–16<br><span class="th-note">relegated</span></th>
@@ -47,6 +56,18 @@
     </section>
 
     <section>
+      <h2>The race so far</h2>
+      <p class="note">How the odds looked after each round, replayed with only the results known at the time.</p>
+      <div class="tabs" role="tablist" id="race-tabs">
+        <button role="tab" data-metric="title" aria-selected="true">Title</button>
+        <button role="tab" data-metric="top3" aria-selected="false">Top 3</button>
+        <button role="tab" data-metric="down" aria-selected="false">Relegation (15–16)</button>
+      </div>
+      <div id="race-legend" class="legend"></div>
+      <div id="race" class="chart-box"><div class="progress"><span>Replaying the season…</span><progress id="race-progress" max="1" value="0"></progress></div></div>
+    </section>
+
+    <section>
       <h2>Where each team finishes</h2>
       <p class="note">Chance of each final position. Stronger colour = more likely. Hover a cell for the exact value.</p>
       <div class="scroll">
@@ -55,14 +76,29 @@
     </section>
 
     <section>
+      <h2>Team strength</h2>
+      <p class="note">Goals each team would score and concede per match against an average opponent at a neutral ground. Recent matches count most.</p>
+      <div id="strength" class="chart-box"></div>
+    </section>
+
+    <section>
       <h2>Remaining matches</h2>
       <p class="note">
         <span class="key"><i class="sw home"></i>Home win</span>
         <span class="key"><i class="sw draw"></i>Draw</span>
         <span class="key"><i class="sw away"></i>Away win</span>
-        · xG is the model's expected goals.
+        <br><b>What if?</b> Pick 1, X or 2 to fix a result and the whole forecast updates. Click a match to see the likely scores.
       </p>
       <div id="fixtures"></div>
+    </section>
+
+    <section>
+      <h2>How accurate is the model?</h2>
+      <p class="note" id="acc-note">Testing the model on past matches it had not seen…</p>
+      <div class="acc">
+        <div id="calibration" class="chart-box"><div class="progress"><span>Backtesting…</span><progress id="acc-progress" max="1" value="0"></progress></div></div>
+        <div id="acc-tiles" class="acc-tiles"></div>
+      </div>
     </section>
 
     <footer>
@@ -72,6 +108,7 @@
         since 2012 (from <a href="https://www.football-data.co.uk/">football-data.co.uk</a>) and the remaining fixtures,
         then fits a <a href="https://en.wikipedia.org/wiki/Dixon%E2%80%93Coles_model">Dixon-Coles</a> model.
         Each team gets an attack and a defence rating, and recent matches count more than old ones.
+        Newly promoted teams start out rated like the weakest teams of the previous season.
         The page then plays out the rest of the season thousands of times. Ties are separated by goal
         difference, then goals scored.
       </p>

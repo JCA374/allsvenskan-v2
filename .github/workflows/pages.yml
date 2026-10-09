@@ -9,7 +9,7 @@ on:
     - cron: "0 5 * * *"   # daily, 05:00 UTC
   push:
     branches: [main]
-    paths: ["site/**", "scripts/export_site_data.py", ".github/workflows/pages.yml"]
+    paths: ["site/**", "core/**", "scripts/**", "tests/**", ".github/workflows/pages.yml"]
   workflow_dispatch:       # "Run workflow" button in the Actions tab
 
 permissions:
@@ -36,6 +36,15 @@ jobs:
           cache: pip
 
       - run: pip install -r requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Tests
+        run: |
+          python -m pytest tests/ -m "not network" -q
+          node --test "tests/js/*.test.mjs"
 
       - name: Fetch latest data
         # If a source is down or the data fails its sanity checks, publish the
