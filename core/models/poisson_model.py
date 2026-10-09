@@ -25,9 +25,7 @@ Time-weighting: φ(t) = exp(−ξ · t)  where t is days before reference date.
 ξ (xi) is the per-day decay rate; default 0.0018 (≈ DC original translated to days).
 """
 
-import pickle
 import warnings
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -35,7 +33,7 @@ from scipy.optimize import minimize
 from scipy.special import gammaln
 
 
-# ── Module-level NLL (must be picklable) ──────────────────────────────────────
+# ── Likelihood and scoring ────────────────────────────────────────────────────
 
 def _neg_log_likelihood(params, home_idx, away_idx, gh, ga, weights, n_teams):
     """Vectorised weighted negative log-likelihood for the Dixon-Coles model.
@@ -90,52 +88,25 @@ def _rps(p_home, p_draw, p_away, outcome):
 class PoissonModel:
     """Dixon-Coles (1997) bivariate-Poisson model with exponential time-weighting.
 
-    Exposes the same public API as the previous heuristic PoissonModel so that
-    all callers (simulator, hybrid model, CLI, Streamlit app) work unchanged.
-
     Parameters
     ----------
     time_decay : float
-        Per-day exponential decay rate ξ (default 0.0018, i.e. DC original).
-        Formerly used as a within-season decay; now the sole time-weighting
-        parameter — no separate season_multiplier step is applied.
-    season_multiplier : float
-        Accepted for API/pickle compatibility; ignored in DC model (ξ covers
-        all time-weighting continuously).
-    use_mle : bool
-        Accepted for API compatibility; DC always fits via maximum pseudo-
-        likelihood — this flag has no effect.
-    use_dixon_coles : bool
-        Accepted for API compatibility; the τ low-score correction is always
-        applied in the DC model.
+        Per-day exponential decay rate ξ (default 0.0018, chosen by backtest).
     """
 
-    def __init__(self, time_decay=0.0018, season_multiplier=0.5,
-                 use_mle=False, use_dixon_coles=False):
-        # Public attributes expected by callers / pickle round-trips
-        self.time_decay        = time_decay
-        self.season_multiplier = season_multiplier   # stored but unused
-        self.use_mle           = use_mle             # stored but unused
-        self.use_dixon_coles   = use_dixon_coles     # stored but unused
-
+    def __init__(self, time_decay=0.0018):
+        self.time_decay     = time_decay
         self.attack_rates   = {}    # {team: α_i}  log-space
         self.defense_rates  = {}    # {team: β_i}  log-space (lower = better)
         self.home_advantage = 0.0   # γ in log-space (~0.25–0.35)
-        self.league_avg     = 0.0   # unused in DC; kept for compat
         self.rho            = 0.0   # ρ Dixon-Coles low-score parameter
         self.fitted         = False
         self.validation_score = None
-        self.last_trained   = None
-        self.training_window = None
-
-        # Internal DC state
-        self._xi          = time_decay   # alias for clarity
-        self._team_index  = {}           # {team: int index}
-        self._params      = None         # raw numpy params array
+        self._team_index    = {}    # {team: int index}
 
     # ── Fitting ───────────────────────────────────────────────────────────────
 
-    def fit(self, results_df, team_stats_df=None):
+    def fit(self, results_df):
         """Fit the Dixon-Coles model on completed match results.
 
         Parameters
@@ -143,8 +114,6 @@ class PoissonModel:
         results_df : pd.DataFrame
             Completed matches with columns: Date, HomeTeam, AwayTeam, FTHG, FTAG.
             SeasonStart is ignored (ξ provides continuous time-weighting).
-        team_stats_df : pd.DataFrame or None
-            Accepted for API compatibility; not used by the DC optimiser.
         """
         try:
             if results_df is None or len(results_df) == 0:
@@ -181,7 +150,7 @@ class PoissonModel:
             # Time weights: φ(t) = exp(−ξ · t)
             ref_date = df['Date'].max()
             days_ago = (ref_date - df['Date']).dt.days.values.astype(float)
-            weights = np.exp(-self._xi * days_ago)
+            weights = np.exp(-self.time_decay * days_ago)
 
             # Vectorise match arrays
             home_idx = df['HomeTeam'].map(self._team_index).values
@@ -193,18 +162,16 @@ class PoissonModel:
             result = self._optimise(home_idx, away_idx, gh, ga, weights, n)
 
             # Store parameters
-            self._params = result.x
-            attack_arr  = self._params[:n]
-            defence_arr = self._params[n:2 * n]
-            gamma       = float(self._params[-2])
-            rho         = float(self._params[-1])
+            attack_arr  = result.x[:n]
+            defence_arr = result.x[n:2 * n]
+            gamma       = float(result.x[-2])
+            rho         = float(result.x[-1])
 
             self.attack_rates   = {t: float(attack_arr[i])  for t, i in self._team_index.items()}
             self.defense_rates  = {t: float(defence_arr[i]) for t, i in self._team_index.items()}
             self.home_advantage = gamma
             self.rho            = rho
             self.fitted         = True
-            self.last_trained   = datetime.now()
 
             # Held-out validation RPS on last 10% of matches
             split = max(int(len(df) * 0.9), len(df) - 100)
@@ -404,82 +371,3 @@ class PoissonModel:
             print(f"Error predicting {home_team} vs {away_team}: {exc}")
             return {'home_win': 0.33, 'draw': 0.33, 'away_win': 0.34,
                     'mu_home': 1.5, 'mu_away': 1.0}
-
-    # ── Persistence ───────────────────────────────────────────────────────────
-
-    def save(self, filepath):
-        """Pickle the model to filepath."""
-        try:
-            data = {
-                'attack_rates':    self.attack_rates,
-                'defense_rates':   self.defense_rates,
-                'home_advantage':  self.home_advantage,
-                'league_avg':      self.league_avg,
-                'fitted':          self.fitted,
-                'rho':             self.rho,
-                'time_decay':      self.time_decay,
-                'season_multiplier': self.season_multiplier,
-                'use_mle':         self.use_mle,
-                'use_dixon_coles': self.use_dixon_coles,
-                'validation_score': self.validation_score,
-                'last_trained':    self.last_trained,
-                'training_window': self.training_window,
-                # DC-specific
-                'xi':         self._xi,
-                '_team_index': self._team_index,
-                '_params':     self._params,
-            }
-            with open(filepath, 'wb') as f:
-                pickle.dump(data, f)
-        except Exception as exc:
-            print(f"Error saving model: {exc}")
-
-    def load(self, filepath):
-        """Load model from pickle file."""
-        try:
-            with open(filepath, 'rb') as f:
-                data = pickle.load(f)
-            self.attack_rates     = data.get('attack_rates', {})
-            self.defense_rates    = data.get('defense_rates', {})
-            self.home_advantage   = data.get('home_advantage', 0.25)
-            self.league_avg       = data.get('league_avg', 0.0)
-            self.fitted           = data.get('fitted', False)
-            self.rho              = data.get('rho', 0.0)
-            self.time_decay       = data.get('time_decay', 0.0018)
-            self.season_multiplier = data.get('season_multiplier', 0.5)
-            self.use_mle          = data.get('use_mle', False)
-            self.use_dixon_coles  = data.get('use_dixon_coles', False)
-            self.validation_score = data.get('validation_score', None)
-            self.last_trained     = data.get('last_trained', None)
-            self.training_window  = data.get('training_window', None)
-            self._xi              = data.get('xi', self.time_decay)
-            self._team_index      = data.get('_team_index', {})
-            self._params          = data.get('_params', None)
-        except Exception as exc:
-            print(f"Error loading model: {exc}")
-            self.fitted = False
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-
-    def get_model_summary(self):
-        """Return a dict of key model statistics for display."""
-        if not self.fitted:
-            return "Model not fitted"
-        return {
-            'teams_count':      len(self.attack_rates),
-            'home_advantage':   round(self.home_advantage, 3),   # γ log-scale
-            'league_avg_goals': round(self.league_avg, 3),
-            'dixon_coles_rho':  round(self.rho, 3),
-            'decay_xi':         self._xi,
-            'time_decay':       self.time_decay,
-            'season_multiplier': self.season_multiplier,
-            'validation_score': (round(self.validation_score, 4)
-                                 if self.validation_score else 'N/A'),
-            'last_trained':     (self.last_trained.strftime('%Y-%m-%d %H:%M')
-                                 if self.last_trained else 'Unknown'),
-            'strongest_attack': (max(self.attack_rates.items(), key=lambda x: x[1])
-                                 if self.attack_rates else None),
-            'strongest_defense': (min(self.defense_rates.items(), key=lambda x: x[1])
-                                  if self.defense_rates else None),
-        }
-

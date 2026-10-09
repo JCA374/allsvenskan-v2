@@ -40,15 +40,8 @@ Thumbs.db
 # Data files
 data/raw/*.csv
 data/clean/*.csv
-data/processed/*.csv
 data/db/*.db
 *.db
-
-# Model files
-models/*.pkl
-
-# Reports
-reports/simulations/*.csv
 
 # Logs
 *.log
@@ -57,6 +50,3 @@ logs/
 # Environment
 .env
 .env.local
-
-# Streamlit
-.streamlit/secrets.toml
