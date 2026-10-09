@@ -135,24 +135,22 @@ class AllsvenskanScraper:
         """Fetch upcoming Allsvenskan fixtures from the ESPN public scoreboard API."""
         today = datetime.now()
         season_end = today.replace(month=11, day=30)
-        date_from = today.strftime("%Y%m%d")
-        date_to = season_end.strftime("%Y%m%d")
         current_year = today.year
 
-        url = (
-            f"{self.ESPN_ALLSVENSKAN_URL}"
-            f"?dates={date_from}-{date_to}&limit=300"
-        )
-        try:
-            resp = self.session.get(url, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            self.logger.warning("ESPN API request failed: %s", exc)
-            return pd.DataFrame()
+        # ESPN no longer answers date-range queries (returns zero events), so
+        # ask for one day at a time.
+        events = []
+        for day in pd.date_range(today.date(), season_end.date(), freq="D"):
+            url = f"{self.ESPN_ALLSVENSKAN_URL}?dates={day:%Y%m%d}"
+            try:
+                resp = self.session.get(url, timeout=self.timeout)
+                resp.raise_for_status()
+                events.extend(resp.json().get("events", []))
+            except Exception as exc:
+                self.logger.warning("ESPN API request failed for %s: %s", day.date(), exc)
 
         rows = []
-        for event in data.get("events", []):
+        for event in events:
             comp = event.get("competitions", [{}])[0]
             status = comp.get("status", {}).get("type", {})
             if status.get("completed", False):

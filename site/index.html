@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allsvenskan Forecast</title>
+  <meta name="description" content="Allsvenskan season forecast — a Dixon-Coles model and Monte Carlo simulation that run in your browser.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Allsvenskan <span id="season"></span> forecast</h1>
+      <p class="sub" id="meta">Loading data…</p>
+      <div class="controls">
+        <label>Simulations
+          <select id="nsims">
+            <option value="1000">1,000</option>
+            <option value="10000" selected>10,000</option>
+            <option value="50000">50,000</option>
+          </select>
+        </label>
+        <button id="run" type="button">Run again</button>
+        <span id="status" class="status" aria-live="polite"></span>
+      </div>
+    </header>
+
+    <section>
+      <h2>Predicted final table</h2>
+      <p class="note">Sorted by expected points. P, Pts and GD are the current table.</p>
+      <div class="scroll">
+        <table id="table">
+          <thead>
+            <tr>
+              <th class="num">#</th><th>Team</th>
+              <th class="num">P</th><th class="num">Pts</th><th class="num">GD</th>
+              <th class="num">Exp. pts</th>
+              <th class="num">Champion</th><th class="num">Top 3</th>
+              <th class="num">14th<br><span class="th-note">playoff</span></th>
+              <th class="num">15–16<br><span class="th-note">relegated</span></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Where each team finishes</h2>
+      <p class="note">Chance of each final position. Stronger colour = more likely. Hover a cell for the exact value.</p>
+      <div class="scroll">
+        <table id="heatmap" class="heatmap"></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Remaining matches</h2>
+      <p class="note">
+        <span class="key"><i class="sw home"></i>Home win</span>
+        <span class="key"><i class="sw draw"></i>Draw</span>
+        <span class="key"><i class="sw away"></i>Away win</span>
+        · xG is the model's expected goals.
+      </p>
+      <div id="fixtures"></div>
+    </section>
+
+    <footer>
+      <h2>How it works</h2>
+      <p>
+        Everything on this page is calculated in your browser. It loads every Allsvenskan result
+        since 2012 (from <a href="https://www.football-data.co.uk/">football-data.co.uk</a>) and the remaining fixtures,
+        then fits a <a href="https://en.wikipedia.org/wiki/Dixon%E2%80%93Coles_model">Dixon-Coles</a> model.
+        Each team gets an attack and a defence rating, and recent matches count more than old ones.
+        The page then plays out the rest of the season thousands of times. Ties are separated by goal
+        difference, then goals scored.
+      </p>
+      <p><a href="https://github.com/JCA374/allsvenskan-v2">Source on GitHub</a></p>
+    </footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

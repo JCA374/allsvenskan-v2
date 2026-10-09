@@ -1,83 +1,4 @@
 Date,HomeTeam,AwayTeam
-2026-07-17,Goteborg,Brommapojkarna
-2026-07-17,Mjallby,Vasteras SK
-2026-07-18,AIK,GAIS
-2026-07-19,Halmstad,Hacken
-2026-07-19,Hammarby,Degerfors
-2026-07-19,Elfsborg,Sirius
-2026-07-20,Kalmar,Malmo FF
-2026-07-20,Orgryte,Djurgarden
-2026-07-24,Vasteras SK,Orgryte
-2026-07-25,Degerfors,Djurgarden
-2026-07-25,Kalmar,Mjallby
-2026-07-26,Brommapojkarna,Hammarby
-2026-07-26,Sirius,Goteborg
-2026-07-26,GAIS,Halmstad
-2026-07-26,Malmo FF,Elfsborg
-2026-07-27,Hacken,AIK
-2026-08-01,Hacken,Kalmar
-2026-08-02,Brommapojkarna,Malmo FF
-2026-08-02,Goteborg,Degerfors
-2026-08-02,AIK,Orgryte
-2026-08-03,Djurgarden,Vasteras SK
-2026-08-03,Halmstad,Sirius
-2026-08-08,Orgryte,AIK
-2026-08-08,Mjallby,Elfsborg
-2026-08-09,Hammarby,Hacken
-2026-08-09,Malmo FF,Degerfors
-2026-08-09,Halmstad,GAIS
-2026-08-09,Goteborg,Kalmar
-2026-08-10,Sirius,Brommapojkarna
-2026-08-10,Vasteras SK,Djurgarden
-2026-08-14,Elfsborg,Vasteras SK
-2026-08-15,Mjallby,Sirius
-2026-08-16,Degerfors,Goteborg
-2026-08-16,Djurgarden,AIK
-2026-08-16,Brommapojkarna,Orgryte
-2026-08-16,GAIS,Malmo FF
-2026-08-16,Kalmar,Hammarby
-2026-08-17,Hacken,Halmstad
-2026-08-21,Sirius,Hacken
-2026-08-22,Orgryte,Halmstad
-2026-08-23,Goteborg,Elfsborg
-2026-08-23,Vasteras SK,Kalmar
-2026-08-23,Hammarby,GAIS
-2026-08-23,Brommapojkarna,Degerfors
-2026-08-24,Malmo FF,Djurgarden
-2026-08-29,Hacken,Vasteras SK
-2026-08-29,Elfsborg,Degerfors
-2026-08-29,Halmstad,Kalmar
-2026-08-30,AIK,Hammarby
-2026-08-30,Goteborg,Orgryte
-2026-08-31,Djurgarden,Mjallby
-2026-08-31,GAIS,Brommapojkarna
-2026-08-31,Sirius,Malmo FF
-2026-09-03,Mjallby,Djurgarden
-2026-09-05,Degerfors,Halmstad
-2026-09-05,GAIS,Hacken
-2026-09-05,Vasteras SK,Sirius
-2026-09-06,Orgryte,Hammarby
-2026-09-06,Brommapojkarna,Elfsborg
-2026-09-07,Kalmar,Djurgarden
-2026-09-07,Malmo FF,AIK
-2026-09-07,Mjallby,Goteborg
-2026-09-11,Hacken,Mjallby
-2026-09-12,AIK,Vasteras SK
-2026-09-12,Goteborg,Halmstad
-2026-09-13,Hammarby,Brommapojkarna
-2026-09-13,Elfsborg,Kalmar
-2026-09-13,Malmo FF,Orgryte
-2026-09-14,Djurgarden,GAIS
-2026-09-14,Sirius,Degerfors
-2026-09-16,AIK,Mjallby
-2026-09-19,Brommapojkarna,Goteborg
-2026-09-19,Vasteras SK,Malmo FF
-2026-09-19,Orgryte,Sirius
-2026-09-20,Djurgarden,Elfsborg
-2026-09-20,Halmstad,AIK
-2026-09-20,Kalmar,Hacken
-2026-09-20,Degerfors,Hammarby
-2026-09-20,Mjallby,GAIS
 2026-10-09,Goteborg,Vasteras SK
 2026-10-10,AIK,Brommapojkarna
 2026-10-10,GAIS,Sirius
@@ -86,54 +7,54 @@ Date,HomeTeam,AwayTeam
 2026-10-11,Hacken,Orgryte
 2026-10-12,Elfsborg,Halmstad
 2026-10-12,Malmo FF,Kalmar
-2026-10-18,AIK,Goteborg
-2026-10-18,Degerfors,Kalmar
-2026-10-18,Halmstad,Hammarby
-2026-10-18,Brommapojkarna,Djurgarden
+2026-10-16,Brommapojkarna,Djurgarden
+2026-10-17,AIK,Goteborg
 2026-10-18,Sirius,Elfsborg
+2026-10-18,Vasteras SK,Mjallby
+2026-10-18,Halmstad,Hammarby
 2026-10-18,Malmo FF,Hacken
 2026-10-18,Orgryte,GAIS
-2026-10-18,Vasteras SK,Mjallby
-2026-10-25,Hacken,Degerfors
-2026-10-25,Djurgarden,Orgryte
+2026-10-19,Degerfors,Kalmar
+2026-10-23,Elfsborg,Malmo FF
+2026-10-23,Vasteras SK,Halmstad
+2026-10-24,Hacken,Degerfors
+2026-10-24,Sirius,AIK
+2026-10-24,Djurgarden,Orgryte
+2026-10-24,Kalmar,Brommapojkarna
 2026-10-25,GAIS,Goteborg
-2026-10-25,Elfsborg,Malmo FF
-2026-10-25,Sirius,AIK
-2026-10-25,Kalmar,Brommapojkarna
 2026-10-25,Mjallby,Hammarby
-2026-10-25,Vasteras SK,Halmstad
-2026-10-28,AIK,Elfsborg
+2026-10-27,AIK,Elfsborg
 2026-10-28,Degerfors,Vasteras SK
 2026-10-28,Halmstad,Malmo FF
-2026-10-28,Hammarby,Sirius
 2026-10-28,Brommapojkarna,Hacken
 2026-10-28,Goteborg,Djurgarden
-2026-10-28,Kalmar,GAIS
-2026-10-28,Orgryte,Mjallby
-2026-11-01,Hacken,Goteborg
+2026-10-29,Hammarby,Sirius
+2026-10-29,Kalmar,GAIS
+2026-10-29,Orgryte,Mjallby
 2026-11-01,Djurgarden,Degerfors
-2026-11-01,GAIS,AIK
-2026-11-01,Elfsborg,Orgryte
-2026-11-01,Sirius,Halmstad
 2026-11-01,Malmo FF,Hammarby
-2026-11-01,Mjallby,Kalmar
+2026-11-01,Hacken,Goteborg
+2026-11-01,Elfsborg,Orgryte
 2026-11-01,Vasteras SK,Brommapojkarna
-2026-11-08,AIK,Hacken
-2026-11-08,Degerfors,GAIS
+2026-11-02,GAIS,AIK
+2026-11-02,Mjallby,Kalmar
+2026-11-03,Sirius,Halmstad
+2026-11-06,Hammarby,Elfsborg
+2026-11-07,Degerfors,GAIS
+2026-11-07,Orgryte,Vasteras SK
 2026-11-08,Halmstad,Djurgarden
-2026-11-08,Hammarby,Elfsborg
-2026-11-08,Brommapojkarna,Mjallby
 2026-11-08,Goteborg,Malmo FF
+2026-11-08,AIK,Hacken
+2026-11-08,Brommapojkarna,Mjallby
 2026-11-08,Kalmar,Sirius
-2026-11-08,Orgryte,Vasteras SK
-2026-11-22,AIK,Degerfors
+2026-11-21,AIK,Degerfors
+2026-11-21,Mjallby,Malmo FF
+2026-11-21,GAIS,Vasteras SK
 2026-11-22,Hacken,Elfsborg
-2026-11-22,GAIS,Vasteras SK
-2026-11-22,Hammarby,Goteborg
-2026-11-22,Brommapojkarna,Halmstad
 2026-11-22,Sirius,Djurgarden
-2026-11-22,Mjallby,Malmo FF
-2026-11-22,Orgryte,Kalmar
+2026-11-22,Brommapojkarna,Halmstad
+2026-11-23,Hammarby,Goteborg
+2026-11-23,Orgryte,Kalmar
 2026-11-29,Degerfors,Orgryte
 2026-11-29,Djurgarden,Hacken
 2026-11-29,Halmstad,Mjallby

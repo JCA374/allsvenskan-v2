@@ -1,0 +1,55 @@
+name: Publish forecast site
+
+# Fetches the latest results + fixtures and publishes site/ to GitHub Pages.
+# The model and simulation run in the visitor's browser, so this job only
+# downloads data (a few seconds of work).
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # daily, 05:00 UTC
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/export_site_data.py", ".github/workflows/pages.yml"]
+  workflow_dispatch:       # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Fetch latest data
+        # If a source is down or the data fails its sanity checks, publish the
+        # data already committed in the repo instead of failing the deploy.
+        run: |
+          python scripts/export_site_data.py --fetch || {
+            echo "::warning::Fetching fresh data failed — publishing committed data"
+            git checkout -- data/ site/data.json
+            python scripts/export_site_data.py
+          }
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -87,6 +87,10 @@ Allsvenskan runs within a single calendar year (approx. April–November). Seaso
 
 Always run this on loaded DataFrames before processing.
 
+### Static site (GitHub Pages)
+
+`site/` is a plain HTML/JS page (no build step) published to GitHub Pages by `.github/workflows/pages.yml` (daily + on push to `main`). The visitor's browser fits the Dixon-Coles model and runs the simulation (`site/model.js`, a JS port of `core/models/poisson_model.py` — keep the two in sync). The only server-side step is `python scripts/export_site_data.py [--fetch]`, which writes `site/data.json` (results + remaining fixtures). Preview locally with `python -m http.server -d site 8000`.
+
 ### Streamlit UI Structure
 
 `app.py` is the entry point (config, sidebar, routing). Each page lives in its own module under `core/ui/pages/` (data, model, simulate, forecast, predictions, update). Shared UI helpers (loaders, navigation, stepper) are in `core/ui/helpers.py`.
