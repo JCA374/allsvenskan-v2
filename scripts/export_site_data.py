@@ -17,10 +17,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import ROOT, RESULTS_PATH, UPCOMING_PATH, GAMES_PER_TEAM
-from core.utils.helpers import normalize_team_names
-
-OUT_PATH = ROOT / "site/data.json"
+from core.config import ROOT, RESULTS_PATH, UPCOMING_PATH, SITE_DATA_PATH as OUT_PATH, GAMES_PER_TEAM
+from core.utils.helpers import normalize_team_names, drop_playoff_matches
 
 
 def main():
@@ -29,11 +27,11 @@ def main():
     args = parser.parse_args()
 
     if args.fetch:
-        from scripts.daily_update import step_fetch_data
-        step_fetch_data()
+        from core.data.pipeline import fetch_and_save
+        fetch_and_save()
 
     results = normalize_team_names(pd.read_csv(RESULTS_PATH, parse_dates=["Date"]))
-    results = results.dropna(subset=["FTHG", "FTAG"]).sort_values("Date")
+    results = drop_playoff_matches(results.dropna(subset=["FTHG", "FTAG"])).sort_values("Date")
     fixtures = normalize_team_names(pd.read_csv(UPCOMING_PATH, parse_dates=["Date"]))
     fixtures = fixtures.sort_values("Date")
 
